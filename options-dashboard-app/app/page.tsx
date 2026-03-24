@@ -6,7 +6,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,7 +33,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-const seedTrades = [
+const seedTrades: Trade[] = [
   {
     id: 1,
     symbol: "IBIT",
@@ -192,11 +191,10 @@ function inRange(dateStr: string, range: string) {
 }
 
 function formatOcc(dateString: string) {
-  const d = new Date(dateString);
-  if (Number.isNaN(d.getTime())) return dateString;
-  return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(
-    -2
-  )}`;
+  const parts = dateString.split("-");
+  if (parts.length !== 3) return dateString;
+  const [year, month, day] = parts;
+  return `${parseInt(month, 10)}/${parseInt(day, 10)}/${year.slice(-2)}`;
 }
 
 function createEmptyNewTrade(): NewTradeForm {
@@ -680,10 +678,9 @@ export default function OptionsTradeDashboard() {
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <Button onClick={() => setIsAddOpen(true)}>Add New Position</Button>
+
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-            <DialogTrigger asChild>
-              <Button>Add New Position</Button>
-            </DialogTrigger>
             <DialogContent className="sm:max-w-xl">
               <DialogHeader>
                 <DialogTitle>Add New Position</DialogTitle>
