@@ -698,7 +698,9 @@ export default function OptionsTradeDashboard() {
                   <Label className="mb-2 block">Side</Label>
                   <Select
                     value={newTrade.side}
-                    onValueChange={(value: TradeSide) => updateNewTrade("side", value)}
+                    onValueChange={(value) => {
+                      if (value) updateNewTrade("side", value as TradeSide);
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -844,7 +846,12 @@ export default function OptionsTradeDashboard() {
             <div className="grid gap-4 md:grid-cols-3">
               <div>
                 <Label className="mb-2 block">Price source</Label>
-                <Select value={provider} onValueChange={(value: Provider) => setProvider(value)}>
+                <Select
+                  value={provider}
+                  onValueChange={(value) => {
+                    if (value) setProvider(value as Provider);
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -907,7 +914,12 @@ export default function OptionsTradeDashboard() {
                 />
               </div>
               <div className="w-full md:w-56">
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    if (value) setStatusFilter(value);
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Filter by status" />
                   </SelectTrigger>
