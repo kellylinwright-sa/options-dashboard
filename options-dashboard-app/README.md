@@ -1,5 +1,23 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Tradier Setup
+
+1. Create a local env file:
+
+```bash
+cp .env.example .env.local
+```
+
+2. Add your Tradier API key to `TRADIER_API_KEY` in `.env.local`.
+
+3. Optional: if you are using paper/sandbox access, also set:
+
+```bash
+TRADIER_BASE_URL=https://sandbox.tradier.com
+```
+
+The app uses a server route (`/api/tradier/snapshot`) so your Tradier key does not need to be sent directly to Tradier from the browser.
+
 ## Getting Started
 
 First, run the development server:

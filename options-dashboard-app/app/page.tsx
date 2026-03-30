@@ -116,7 +116,7 @@ function percent(value: number) {
 
 type TradeStatus = "OPEN" | "CLOSED";
 type TradeSide = "CALL" | "PUT";
-type Provider = "manual" | "tradier";
+type Provider = "manual" | "tradier" | "finnhub";
 
 type Trade = {
   id: number;
@@ -195,6 +195,12 @@ function formatOcc(dateString: string) {
   if (parts.length !== 3) return dateString;
   const [year, month, day] = parts;
   return `${parseInt(month, 10)}/${parseInt(day, 10)}/${year.slice(-2)}`;
+}
+
+function getProviderLabel(provider: Provider) {
+  if (provider === "tradier") return "Tradier";
+  if (provider === "finnhub") return "Finnhub";
+  return "Manual";
 }
 
 function createEmptyNewTrade(): NewTradeForm {
@@ -331,68 +337,56 @@ async function fetchOptionSnapshot({
     };
   }
 
-  if (!apiKey) {
+  if (provider === "finnhub" && !apiKey) {
     throw new Error("Add an API key to use live prices.");
   }
 
   if (provider === "tradier") {
-    const occ = new Date(trade.expiration);
-    if (Number.isNaN(occ.getTime())) {
-      throw new Error(`Invalid expiration for ${trade.symbol}`);
-    }
-
-    const yy = String(occ.getFullYear()).slice(-2);
-    const mm = String(occ.getMonth() + 1).padStart(2, "0");
-    const dd = String(occ.getDate()).padStart(2, "0");
-    const strikeInt = String(Math.round(Number(trade.strike) * 1000)).padStart(
-      8,
-      "0"
-    );
-    const optionSymbol = `${trade.symbol}${yy}${mm}${dd}${
-      trade.side === "CALL" ? "C" : "P"
-    }${strikeInt}`;
-
-    const res = await fetch(
-      `https://api.tradier.com/v1/markets/quotes?symbols=${optionSymbol},${trade.symbol}&greeks=true`,
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json",
-        },
-      }
-    );
+    const res = await fetch("/api/tradier/snapshot", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        trade,
+        apiKey: apiKey || undefined,
+      }),
+    });
 
     if (!res.ok) {
-      throw new Error("Tradier quote request failed.");
+      const errorBody = await res.json().catch(() => null);
+      throw new Error(errorBody?.error || "Tradier quote request failed.");
     }
 
-    const json = await res.json();
-    const quotes = Array.isArray(json?.quotes?.quote)
-      ? json.quotes.quote
-      : [json?.quotes?.quote].filter(Boolean);
-
-    const optionQuote = quotes.find(
-      (q: { symbol: string }) => q.symbol === optionSymbol
-    );
-    const stockQuote = quotes.find(
-      (q: { symbol: string }) => q.symbol === trade.symbol
-    );
-
-    if (!optionQuote) {
-      throw new Error(`No option quote found for ${optionSymbol}`);
-    }
-
-    const hasBidAsk = [optionQuote.bid, optionQuote.ask].every(
-      (v) => typeof v === "number"
-    );
-    const mark = hasBidAsk
-      ? (optionQuote.bid + optionQuote.ask) / 2
-      : optionQuote.last ?? trade.currentPrice;
+    const data = await res.json();
 
     return {
-      currentPrice: Number(mark ?? trade.currentPrice),
-      underlyingPrice: Number(stockQuote?.last ?? trade.underlyingPrice),
-      source: "Tradier",
+      currentPrice: Number(data?.currentPrice ?? trade.currentPrice),
+      underlyingPrice: Number(data?.underlyingPrice ?? trade.underlyingPrice),
+      source: data?.source || "Tradier",
+    };
+  }
+
+  if (provider === "finnhub") {
+    const stockRes = await fetch(
+      `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(trade.symbol)}&token=${encodeURIComponent(apiKey)}`
+    );
+
+    if (!stockRes.ok) {
+      throw new Error("Finnhub quote request failed.");
+    }
+
+    const stockQuote = await stockRes.json();
+    const stockLast = Number(stockQuote?.c);
+
+    if (!Number.isFinite(stockLast) || stockLast <= 0) {
+      throw new Error(`Finnhub did not return a stock quote for ${trade.symbol}.`);
+    }
+
+    return {
+      currentPrice: trade.currentPrice,
+      underlyingPrice: stockLast,
+      source: "Finnhub (stock only)",
     };
   }
 
@@ -597,7 +591,7 @@ export default function OptionsTradeDashboard() {
       );
 
       syncJson(updated);
-      setSourceLabel(provider === "manual" ? "Manual" : "Tradier");
+      setSourceLabel(getProviderLabel(provider));
       setLastRefresh(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not refresh prices.");
@@ -628,7 +622,9 @@ export default function OptionsTradeDashboard() {
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               This version is built around your current option positions and can
               use live prices. Manual mode works immediately. For real-time
-              marks, switch to Tradier and paste your API key.
+              marks, switch to Tradier and set TRADIER_API_KEY in your
+              environment. Finnhub currently updates the underlying stock price
+              only.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -858,17 +854,27 @@ export default function OptionsTradeDashboard() {
                   <SelectContent>
                     <SelectItem value="manual">Manual</SelectItem>
                     <SelectItem value="tradier">Tradier API</SelectItem>
+                    <SelectItem value="finnhub">Finnhub API</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="md:col-span-2">
-                <Label className="mb-2 block">API key</Label>
-                <Input
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Paste your Tradier API key"
-                  type="password"
-                />
+                {provider === "tradier" ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                    Using TRADIER_API_KEY from server environment (.env.local).
+                    No copy/paste needed after setup.
+                  </div>
+                ) : (
+                  <>
+                    <Label className="mb-2 block">API key</Label>
+                    <Input
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder={`Paste your ${getProviderLabel(provider)} API key`}
+                      type="password"
+                    />
+                  </>
+                )}
               </div>
             </div>
 
@@ -896,6 +902,13 @@ export default function OptionsTradeDashboard() {
             {error ? (
               <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 {error}
+              </div>
+            ) : null}
+
+            {provider === "finnhub" ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Finnhub is currently used for the underlying stock quote only.
+                Option contract marks remain at your manual values in this dashboard.
               </div>
             ) : null}
           </CardContent>
