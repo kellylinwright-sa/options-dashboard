@@ -499,7 +499,7 @@ export default function OptionsTradeDashboard() {
       if (!Array.isArray(parsed)) {
         throw new Error("JSON must be an array of trades");
       }
-      setTrades(parsed);
+      syncJson(parsed);
       setError("");
     } catch (err) {
       setError(`Could not load data: ${err instanceof Error ? err.message : "Unknown error"}`);
