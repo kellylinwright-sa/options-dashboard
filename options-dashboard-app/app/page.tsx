@@ -396,8 +396,32 @@ async function fetchOptionSnapshot({
 export default function OptionsTradeDashboard() {
   const [range, setRange] = useState("all");
   const [search, setSearch] = useState("");
-  const [rawJson, setRawJson] = useState(JSON.stringify(seedTrades, null, 2));
-  const [trades, setTrades] = useState<Trade[]>(seedTrades);
+
+  const [trades, setTrades] = useState<Trade[]>(() => {
+    if (typeof window === "undefined") return seedTrades;
+    try {
+      const stored = localStorage.getItem("options-dashboard-trades");
+      if (stored) return JSON.parse(stored) as Trade[];
+    } catch {
+      // ignore parse errors
+    }
+    return seedTrades;
+  });
+
+  const [rawJson, setRawJson] = useState(() => JSON.stringify(
+    (() => {
+      if (typeof window === "undefined") return seedTrades;
+      try {
+        const stored = localStorage.getItem("options-dashboard-trades");
+        if (stored) return JSON.parse(stored) as Trade[];
+      } catch {
+        // ignore parse errors
+      }
+      return seedTrades;
+    })(),
+    null,
+    2
+  ));
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [provider, setProvider] = useState<Provider>("manual");
   const [apiKey, setApiKey] = useState("");
@@ -441,6 +465,11 @@ export default function OptionsTradeDashboard() {
   function syncJson(nextTrades: Trade[]) {
     setTrades(nextTrades);
     setRawJson(JSON.stringify(nextTrades, null, 2));
+    try {
+      localStorage.setItem("options-dashboard-trades", JSON.stringify(nextTrades));
+    } catch {
+      // ignore storage errors (e.g. private browsing quota)
+    }
   }
 
   function loadJson() {
@@ -1005,8 +1034,7 @@ export default function OptionsTradeDashboard() {
                   <Button
                     variant="outline"
                     onClick={() => {
-                      setTrades(seedTrades);
-                      setRawJson(JSON.stringify(seedTrades, null, 2));
+                      syncJson(seedTrades);
                       setError("");
                     }}
                   >
