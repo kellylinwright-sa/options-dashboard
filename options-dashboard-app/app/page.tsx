@@ -290,6 +290,24 @@ function PositionRow({
             ? ` · Stock ${money(trade.underlyingPrice)}`
             : ""}
         </div>
+        <div className="mt-1 text-xs text-slate-400">
+          <span
+            className={`inline-block rounded px-1.5 py-0.5 font-medium ${
+              trade.status === "OPEN"
+                ? "bg-emerald-100 text-emerald-700"
+                : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            {trade.status}
+          </span>
+          {trade.openedAt ? ` · Opened ${formatOcc(trade.openedAt)}` : ""}
+          {trade.status === "CLOSED" && trade.closedAt
+            ? ` · Closed ${formatOcc(trade.closedAt)}`
+            : ""}
+          {trade.status === "CLOSED" && trade.exitPrice != null
+            ? ` · Exit Price ${money((Number(trade.exitPrice) || 0) * 100)}`
+            : ""}
+        </div>
         {trade.notes ? (
           <div className="mt-1 text-xs text-slate-400 italic">{trade.notes}</div>
         ) : null}
