@@ -290,6 +290,9 @@ function PositionRow({
             ? ` · Stock ${money(trade.underlyingPrice)}`
             : ""}
         </div>
+        {trade.notes ? (
+          <div className="mt-1 text-xs text-slate-400 italic">{trade.notes}</div>
+        ) : null}
       </div>
       <div className="flex items-center gap-4">
         <div className="text-right">
