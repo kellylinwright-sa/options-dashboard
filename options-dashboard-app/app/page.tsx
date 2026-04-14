@@ -418,31 +418,9 @@ export default function OptionsTradeDashboard() {
   const [range, setRange] = useState("all");
   const [search, setSearch] = useState("");
 
-  const [trades, setTrades] = useState<Trade[]>(() => {
-    if (typeof window === "undefined") return seedTrades;
-    try {
-      const stored = localStorage.getItem("options-dashboard-trades");
-      if (stored) return JSON.parse(stored) as Trade[];
-    } catch {
-      // ignore parse errors
-    }
-    return seedTrades;
-  });
-
-  const [rawJson, setRawJson] = useState(() => JSON.stringify(
-    (() => {
-      if (typeof window === "undefined") return seedTrades;
-      try {
-        const stored = localStorage.getItem("options-dashboard-trades");
-        if (stored) return JSON.parse(stored) as Trade[];
-      } catch {
-        // ignore parse errors
-      }
-      return seedTrades;
-    })(),
-    null,
-    2
-  ));
+  const [trades, setTrades] = useState<Trade[]>(seedTrades);
+  const [rawJson, setRawJson] = useState(JSON.stringify(seedTrades, null, 2));
+  const [hasHydrated, setHasHydrated] = useState(false);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [provider, setProvider] = useState<Provider>("manual");
   const [apiKey, setApiKey] = useState("");
@@ -504,6 +482,49 @@ export default function OptionsTradeDashboard() {
     } catch (err) {
       setError(`Could not load data: ${err instanceof Error ? err.message : "Unknown error"}`);
     }
+  }
+
+  function handleExportTrades() {
+    const data = localStorage.getItem("options-dashboard-trades");
+
+    if (!data) {
+      alert("No trades to export");
+      return;
+    }
+
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "options-dashboard-trades.json";
+    a.click();
+
+    URL.revokeObjectURL(url);
+  }
+
+  function handleImportTrades(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      try {
+        const parsed = JSON.parse(e.target?.result as string);
+        localStorage.setItem(
+          "options-dashboard-trades",
+          JSON.stringify(parsed)
+        );
+
+        alert("Trades imported successfully");
+        window.location.reload();
+      } catch {
+        alert("Invalid file");
+      }
+    };
+
+    reader.readAsText(file);
   }
 
   function updateNewTrade<K extends keyof NewTradeForm>(field: K, value: NewTradeForm[K]) {
@@ -651,12 +672,37 @@ export default function OptionsTradeDashboard() {
   }
 
   useEffect(() => {
+    try {
+      const stored = localStorage.getItem("options-dashboard-trades");
+      if (stored) {
+        const parsed = JSON.parse(stored) as Trade[];
+        setTrades(parsed);
+        setRawJson(JSON.stringify(parsed, null, 2));
+      }
+    } catch {
+      // ignore parse/storage errors
+    } finally {
+      setHasHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!autoRefresh || provider === "manual") return;
     const timer = window.setInterval(() => {
       refreshPrices();
     }, 30000);
     return () => window.clearInterval(timer);
   }, [autoRefresh, provider, apiKey, trades]);
+
+  if (!hasHydrated) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+        <div className="mx-auto max-w-7xl text-sm text-slate-500">
+          Loading dashboard...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
@@ -726,6 +772,20 @@ export default function OptionsTradeDashboard() {
         <div className="flex flex-wrap gap-3">
           <Button onClick={() => setIsAddOpen(true)}>Add New Position</Button>
 
+          <Button variant="outline" onClick={handleExportTrades}>
+            Export Trades
+          </Button>
+
+          <label className="cursor-pointer border px-3 py-2 rounded">
+            Import Trades
+            <input
+              type="file"
+              accept="application/json"
+              onChange={handleImportTrades}
+              className="hidden"
+            />
+          </label>
+
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogContent className="sm:max-w-xl">
               <DialogHeader>
@@ -764,6 +824,7 @@ export default function OptionsTradeDashboard() {
                     onChange={(e) => updateNewTrade("strike", e.target.value)}
                     placeholder="55"
                     type="number"
+                    step="0.01"
                   />
                 </div>
                 <div>
