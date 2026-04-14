@@ -467,9 +467,11 @@ export default function OptionsTradeDashboard() {
   setRawJson(JSON.stringify(nextTrades, null, 2));
 
   try {
-    localStorage.setItem("options-dashboard-trades", JSON.stringify(nextTrades));
-    setLastSavedAt(new Date()); 
-  } catch {
+  localStorage.setItem("options-dashboard-trades", JSON.stringify(nextTrades));
+  const now = new Date().toISOString();
+  localStorage.setItem("options-dashboard-last-saved-at", now);
+  setLastSavedAt(now);
+} catch {
     // ignore storage errors
   }
 }
@@ -516,12 +518,16 @@ export default function OptionsTradeDashboard() {
       try {
         const parsed = JSON.parse(e.target?.result as string);
         localStorage.setItem(
-          "options-dashboard-trades",
-          JSON.stringify(parsed)
-        );
+  "options-dashboard-trades",
+  JSON.stringify(parsed)
+);
 
-        alert("Trades imported successfully");
-        window.location.reload();
+const now = new Date().toISOString();
+localStorage.setItem("options-dashboard-last-saved-at", now);
+setLastSavedAt(now);
+
+alert("Trades imported successfully");
+window.location.reload();
       } catch {
         alert("Invalid file");
       }
@@ -675,19 +681,25 @@ export default function OptionsTradeDashboard() {
   }
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("options-dashboard-trades");
-      if (stored) {
-        const parsed = JSON.parse(stored) as Trade[];
-        setTrades(parsed);
-        setRawJson(JSON.stringify(parsed, null, 2));
-      }
-    } catch {
-      // ignore parse/storage errors
-    } finally {
-      setHasHydrated(true);
+  try {
+    const stored = localStorage.getItem("options-dashboard-trades");
+    const savedAt = localStorage.getItem("options-dashboard-last-saved-at");
+
+    if (stored) {
+      const parsed = JSON.parse(stored) as Trade[];
+      setTrades(parsed);
+      setRawJson(JSON.stringify(parsed, null, 2));
     }
-  }, []);
+
+    if (savedAt) {
+      setLastSavedAt(savedAt);
+    }
+  } catch {
+    // ignore parse/storage errors
+  } finally {
+    setHasHydrated(true);
+  }
+}, []);
 
   useEffect(() => {
     if (!autoRefresh || provider === "manual") return;
