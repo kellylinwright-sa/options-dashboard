@@ -427,6 +427,7 @@ export default function OptionsTradeDashboard() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [error, setError] = useState("");
   const [sourceLabel, setSourceLabel] = useState("Manual");
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -462,14 +463,16 @@ export default function OptionsTradeDashboard() {
     : 0;
 
   function syncJson(nextTrades: Trade[]) {
-    setTrades(nextTrades);
-    setRawJson(JSON.stringify(nextTrades, null, 2));
-    try {
-      localStorage.setItem("options-dashboard-trades", JSON.stringify(nextTrades));
-    } catch {
-      // ignore storage errors (e.g. private browsing quota)
-    }
+  setTrades(nextTrades);
+  setRawJson(JSON.stringify(nextTrades, null, 2));
+
+  try {
+    localStorage.setItem("options-dashboard-trades", JSON.stringify(nextTrades));
+    setLastSavedAt(new Date()); 
+  } catch {
+    // ignore storage errors
   }
+}
 
   function loadJson() {
     try {
@@ -942,7 +945,11 @@ export default function OptionsTradeDashboard() {
             </DialogContent>
           </Dialog>
         </div>
-
+<div className="text-sm text-slate-500 mt-2 italic">
+  {lastSavedAt
+    ? `Saved locally at ${new Date(lastSavedAt).toLocaleTimeString()} · Browser storage active · Export a backup after major changes`
+    : "Browser storage active · Export a backup after major changes"}
+</div>
         <Card className="rounded-2xl shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl">
