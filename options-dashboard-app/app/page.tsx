@@ -427,7 +427,7 @@ export default function OptionsTradeDashboard() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [sourceLabel, setSourceLabel] = useState("Manual");
   const [isAddOpen, setIsAddOpen] = useState(false);
