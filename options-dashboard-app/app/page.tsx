@@ -168,7 +168,30 @@ function positionValue(trade: Trade) {
 }
 
 function contractPnl(trade: Trade) {
-  return positionValue(trade) - positionCost(trade);
+  const entry = Number(trade.entryPrice) || 0;
+  const current =
+    trade.status === "CLOSED"
+      ? Number(trade.exitPrice) || 0
+      : Number(trade.currentPrice) || 0;
+
+  const pnl = (current - entry) * trade.quantity * 100;
+
+  if (trade.symbol === "IREN") {
+    console.log("IREN DEBUG", {
+      symbol: trade.symbol,
+      strike: trade.strike,
+      expiration: trade.expiration,
+      side: trade.side,
+      quantity: trade.quantity,
+      entryPrice: trade.entryPrice,
+      currentPrice: trade.currentPrice,
+      exitPrice: trade.exitPrice,
+      pnl,
+      status: trade.status,
+    });
+  }
+
+  return pnl;
 }
 
 function returnPct(trade: Trade) {
@@ -659,16 +682,29 @@ window.location.reload();
       setError("");
 
       const updated = await Promise.all(
-        trades.map(async (trade) => {
-          if (trade.status === "CLOSED") return trade;
-          const snapshot = await fetchOptionSnapshot({ trade, provider, apiKey });
-          return {
-            ...trade,
-            currentPrice: snapshot.currentPrice,
-            underlyingPrice: snapshot.underlyingPrice,
-          };
-        })
-      );
+  trades.map(async (trade) => {
+    if (trade.status === "CLOSED") return trade;
+
+    const snapshot = await fetchOptionSnapshot({ trade, provider, apiKey });
+
+    if (trade.symbol === "IREN") {
+      console.log("IREN SNAPSHOT DEBUG", {
+        provider,
+        trade,
+        snapshot,
+      });
+    }
+
+    return {
+      ...trade,
+      currentPrice: Number(snapshot.currentPrice ?? trade.currentPrice),
+      underlyingPrice:
+        snapshot.underlyingPrice == null
+          ? trade.underlyingPrice
+          : Number(snapshot.underlyingPrice),
+    };
+  })
+);
 
       syncJson(updated);
       setSourceLabel(getProviderLabel(provider));
