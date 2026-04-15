@@ -15,14 +15,17 @@ type SnapshotBody = {
 };
 
 function createOccOptionSymbol(trade: SnapshotTrade) {
-  const occ = new Date(trade.expiration);
-  if (Number.isNaN(occ.getTime())) {
+  const parts = trade.expiration.split("-");
+  if (parts.length !== 3) {
     throw new Error(`Invalid expiration for ${trade.symbol}`);
   }
 
-  const yy = String(occ.getFullYear()).slice(-2);
-  const mm = String(occ.getMonth() + 1).padStart(2, "0");
-  const dd = String(occ.getDate()).padStart(2, "0");
+  const [yyyy, mm, dd] = parts;
+  if (!/^\d{4}$/.test(yyyy) || !/^\d{2}$/.test(mm) || !/^\d{2}$/.test(dd)) {
+    throw new Error(`Invalid expiration for ${trade.symbol}`);
+  }
+
+  const yy = yyyy.slice(-2);
   const strikeInt = String(Math.round(Number(trade.strike) * 1000)).padStart(
     8,
     "0"
@@ -109,17 +112,69 @@ export async function POST(request: Request) {
       );
     }
 
-    const hasBidAsk = [optionQuote.bid, optionQuote.ask].every(
-      (v) => typeof v === "number"
-    );
-    const mark = hasBidAsk
-      ? (optionQuote.bid + optionQuote.ask) / 2
-      : optionQuote.last ?? trade.currentPrice ?? 0;
+    const returnedOptionSymbol =
+      typeof optionQuote.symbol === "string" ? optionQuote.symbol : null;
 
-    console.log("[Tradier] Success - mark:", mark, "underlying:", stockQuote?.last);
+    if (!returnedOptionSymbol || returnedOptionSymbol !== optionSymbol) {
+      return Response.json(
+        {
+          error: `Option symbol mismatch. Expected ${optionSymbol}, received ${returnedOptionSymbol || "unknown"}.`,
+        },
+        { status: 409 }
+      );
+    }
+
+    const rawBid =
+      typeof optionQuote.bid === "number" && Number.isFinite(optionQuote.bid) && optionQuote.bid >= 0
+        ? optionQuote.bid
+        : null;
+    const rawAsk =
+      typeof optionQuote.ask === "number" && Number.isFinite(optionQuote.ask) && optionQuote.ask >= 0
+        ? optionQuote.ask
+        : null;
+    const rawLast =
+      typeof optionQuote.last === "number" && Number.isFinite(optionQuote.last) && optionQuote.last > 0
+        ? optionQuote.last
+        : null;
+    const rawMark =
+      typeof optionQuote.mark === "number" && Number.isFinite(optionQuote.mark) && optionQuote.mark > 0
+        ? optionQuote.mark
+        : null;
+
+    const hasValidBidAsk =
+      rawBid !== null && rawAsk !== null && rawAsk >= rawBid && rawAsk > 0;
+    const markIsWithinSpread =
+      rawMark !== null && hasValidBidAsk
+        ? rawMark >= rawBid && rawMark <= rawAsk
+        : rawMark !== null;
+
+    let computedPrice: number | null = null;
+    if (rawMark !== null && markIsWithinSpread) {
+      computedPrice = rawMark;
+    } else if (hasValidBidAsk) {
+      computedPrice = (rawBid + rawAsk) / 2;
+    } else if (rawLast !== null) {
+      computedPrice = rawLast;
+    }
+
+    const rawStockLast =
+      typeof stockQuote?.last === "number" && Number.isFinite(stockQuote.last) && stockQuote.last > 0
+        ? stockQuote.last
+        : null;
+
+    console.log(
+      "[Tradier] Success - computedPrice:", computedPrice,
+      "bid:", rawBid, "ask:", rawAsk, "last:", rawLast, "mark:", rawMark,
+      "underlying:", rawStockLast
+    );
     return Response.json({
-      currentPrice: Number(mark ?? trade.currentPrice ?? 0),
-      underlyingPrice: Number(stockQuote?.last ?? trade.underlyingPrice ?? 0),
+      optionSymbol: returnedOptionSymbol,
+      currentPrice: computedPrice,
+      underlyingPrice: rawStockLast,
+      bid: rawBid,
+      ask: rawAsk,
+      last: rawLast,
+      mark: rawMark,
       source: "Tradier",
     });
   } catch (error) {

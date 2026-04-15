@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -116,6 +116,7 @@ function percent(value: number) {
 
 type TradeStatus = "OPEN" | "CLOSED";
 type TradeSide = "CALL" | "PUT";
+type PositionDirection = "LONG" | "SHORT";
 type Provider = "manual" | "tradier" | "finnhub";
 
 type Trade = {
@@ -126,7 +127,9 @@ type Trade = {
   expiration: string;
   quantity: number;
   entryPrice: number;
-  currentPrice: number;
+  direction?: PositionDirection;
+  netCostBasis?: number | null;
+  currentPrice: number | null;
   exitPrice: number | null;
   status: TradeStatus;
   openedAt: string;
@@ -138,10 +141,12 @@ type Trade = {
 type NewTradeForm = {
   symbol: string;
   side: TradeSide;
+  direction: PositionDirection;
   strike: string;
   expiration: string;
   quantity: number | string;
   entryPrice: string;
+  netCostBasis: string;
   currentPrice: string;
   notes: string;
   underlyingPrice: string;
@@ -155,49 +160,84 @@ type SellForm = {
   closedAt: string;
 };
 
-function positionCost(trade: Trade) {
-  return (Number(trade.entryPrice) || 0) * 100 * (Number(trade.quantity) || 0);
+function positionCost(trade: Trade): number | null {
+  const entry = Number(trade.entryPrice);
+  const qty = Number(trade.quantity);
+  if (!Number.isFinite(entry) || entry <= 0 || !Number.isFinite(qty) || qty <= 0) return null;
+  return entry * 100 * qty;
 }
 
-function positionValue(trade: Trade) {
-  const px =
-    trade.status === "CLOSED"
-      ? Number(trade.exitPrice) || 0
-      : Number(trade.currentPrice) || 0;
-  return px * 100 * (Number(trade.quantity) || 0);
+function effectiveCostBasis(trade: Trade): number | null {
+  const override = Number(trade.netCostBasis);
+  if (Number.isFinite(override) && override > 0) return override;
+  return positionCost(trade);
 }
 
-function contractPnl(trade: Trade) {
-  const entry = Number(trade.entryPrice) || 0;
-  const current =
-    trade.status === "CLOSED"
-      ? Number(trade.exitPrice) || 0
-      : Number(trade.currentPrice) || 0;
+function positionValue(trade: Trade): number | null {
+  const qty = Number(trade.quantity);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  if (trade.status === "CLOSED") {
+    const ep = Number(trade.exitPrice);
+    if (!Number.isFinite(ep) || ep < 0) return null;
+    return ep * 100 * qty;
+  }
+  if (trade.currentPrice == null || !Number.isFinite(trade.currentPrice) || trade.currentPrice < 0) return null;
+  return trade.currentPrice * 100 * qty;
+}
 
-  const pnl = (current - entry) * trade.quantity * 100;
+function contractPnl(trade: Trade): number | null {
+  const entry = Number(trade.entryPrice);
+  const qty = Number(trade.quantity);
+  if (!Number.isFinite(entry) || entry <= 0 || !Number.isFinite(qty) || qty <= 0) return null;
+  const direction = trade.direction ?? "LONG";
 
-  if (trade.symbol === "IREN") {
-    console.log("IREN DEBUG", {
-      symbol: trade.symbol,
-      strike: trade.strike,
-      expiration: trade.expiration,
-      side: trade.side,
-      quantity: trade.quantity,
-      entryPrice: trade.entryPrice,
-      currentPrice: trade.currentPrice,
-      exitPrice: trade.exitPrice,
-      pnl,
-      status: trade.status,
-    });
+  if (trade.status === "CLOSED") {
+    const ep = Number(trade.exitPrice);
+    if (!Number.isFinite(ep) || ep < 0) return null;
+    return direction === "SHORT"
+      ? (entry - ep) * qty * 100
+      : (ep - entry) * qty * 100;
   }
 
-  return pnl;
+  if (trade.currentPrice == null || !Number.isFinite(trade.currentPrice) || trade.currentPrice < 0) return null;
+  return direction === "SHORT"
+    ? (entry - trade.currentPrice) * qty * 100
+    : (trade.currentPrice - entry) * qty * 100;
 }
 
-function returnPct(trade: Trade) {
-  const base = positionCost(trade);
-  if (!base) return 0;
-  return (contractPnl(trade) / base) * 100;
+function returnPct(trade: Trade): number | null {
+  const base = effectiveCostBasis(trade);
+  const pnl = contractPnl(trade);
+  if (base == null || base === 0 || pnl == null) return null;
+  return (pnl / base) * 100;
+}
+
+function brokerAdjustedPnl(trade: Trade): number | null {
+  const basis = effectiveCostBasis(trade);
+  const value = positionValue(trade);
+  if (basis == null || value == null) return null;
+  return (trade.direction ?? "LONG") === "SHORT" ? basis - value : value - basis;
+}
+
+function brokerAdjustedReturnPct(trade: Trade): number | null {
+  const basis = effectiveCostBasis(trade);
+  const pnl = brokerAdjustedPnl(trade);
+  if (basis == null || basis === 0 || pnl == null) return null;
+  return (pnl / basis) * 100;
+}
+
+function normalizeTrade(raw: Trade): Trade {
+  return {
+    ...raw,
+    symbol: String(raw.symbol || "").toUpperCase(),
+    direction: raw.direction === "SHORT" ? "SHORT" : "LONG",
+    netCostBasis:
+      raw.netCostBasis == null
+        ? null
+        : Number.isFinite(Number(raw.netCostBasis))
+          ? Number(raw.netCostBasis)
+          : null,
+  };
 }
 
 function inRange(dateStr: string, range: string) {
@@ -220,6 +260,18 @@ function formatOcc(dateString: string) {
   return `${parseInt(month, 10)}/${parseInt(day, 10)}/${year.slice(-2)}`;
 }
 
+function buildOccSymbol(trade: Trade): string | null {
+  const parts = trade.expiration.split("-");
+  if (parts.length !== 3) return null;
+  const [yyyy, mm, dd] = parts;
+  if (!/^\d{4}$/.test(yyyy) || !/^\d{2}$/.test(mm) || !/^\d{2}$/.test(dd)) {
+    return null;
+  }
+  const yy = yyyy.slice(-2);
+  const strikeInt = String(Math.round(Number(trade.strike) * 1000)).padStart(8, "0");
+  return `${trade.symbol}${yy}${mm}${dd}${trade.side === "CALL" ? "C" : "P"}${strikeInt}`;
+}
+
 function getProviderLabel(provider: Provider) {
   if (provider === "tradier") return "Tradier";
   if (provider === "finnhub") return "Finnhub";
@@ -230,10 +282,12 @@ function createEmptyNewTrade(): NewTradeForm {
   return {
     symbol: "",
     side: "CALL",
+    direction: "LONG",
     strike: "",
     expiration: "",
     quantity: 1,
     entryPrice: "",
+    netCostBasis: "",
     currentPrice: "",
     notes: "",
     underlyingPrice: "",
@@ -257,17 +311,17 @@ function StatCard({
   hint,
 }: {
   title: string;
-  value: string | number;
+  value: string | number | null;
   icon: React.ComponentType<{ className?: string }>;
   hint?: string;
 }) {
   return (
-    <Card className="rounded-2xl shadow-sm">
+    <Card className="rounded-2xl border-amber-200 bg-amber-50 shadow-sm">
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm text-slate-500">{title}</p>
-            <p className="mt-2 text-2xl font-semibold tracking-tight">{value}</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight">{value ?? "N/A"}</p>
             {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
           </div>
           <div className="rounded-2xl border p-2">
@@ -287,33 +341,37 @@ function PositionRow({
   onSell: (tradeId: number) => void;
 }) {
   const pnl = contractPnl(trade);
-  const positive = pnl >= 0;
+  const positive = pnl !== null && pnl >= 0;
   const pct = returnPct(trade);
+  const brokerPnl = brokerAdjustedPnl(trade);
+  const brokerPct = brokerAdjustedReturnPct(trade);
+  const brokerPositive = brokerPnl !== null && brokerPnl >= 0;
   const isOpen = trade.status === "OPEN";
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border p-4">
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-sky-200 bg-sky-50 p-4">
       <div className="min-w-0">
-        <div className="truncate text-lg font-semibold">
+        <div className="truncate text-lg font-semibold text-blue-900 underline decoration-2 underline-offset-2">
           {trade.symbol} ${trade.strike} {trade.side}
         </div>
-        <div className="mt-1 text-sm text-slate-500">
+        <div className="mt-1 text-base font-semibold text-black">
           {formatOcc(trade.expiration)} · {trade.quantity}{" "}
           {trade.quantity === 1 ? "buy" : "buys"}
+          {` · ${trade.direction ?? "LONG"}`}
           {trade.status === "CLOSED" && trade.closedAt
             ? ` · sold ${formatOcc(trade.closedAt)}`
             : ""}
         </div>
-        <div className="mt-1 text-xs text-slate-400">
+        <div className="mt-1 text-sm font-semibold text-black">
           Entry {money((Number(trade.entryPrice) || 0) * 100)}
           {trade.status === "CLOSED"
             ? ` · Exit ${money((Number(trade.exitPrice) || 0) * 100)}`
-            : ` · Mark ${money((Number(trade.currentPrice) || 0) * 100)}`}
+            : ` · Mark ${trade.currentPrice != null ? money(trade.currentPrice * 100) : "N/A"}`}
           {typeof trade.underlyingPrice === "number"
             ? ` · Stock ${money(trade.underlyingPrice)}`
             : ""}
         </div>
-        <div className="mt-1 text-xs text-slate-400">
+        <div className="mt-1 text-sm font-semibold text-black">
           <span
             className={`inline-block rounded px-1.5 py-0.5 font-medium ${
               trade.status === "OPEN"
@@ -332,26 +390,41 @@ function PositionRow({
             : ""}
         </div>
         {trade.notes ? (
-          <div className="mt-1 text-xs text-slate-400 italic">{trade.notes}</div>
+          <div className="mt-1 text-sm font-semibold text-black italic">{trade.notes}</div>
         ) : null}
       </div>
       <div className="flex items-center gap-4">
         <div className="text-right">
           <div
             className={`text-2xl font-semibold ${
-              positive ? "text-emerald-600" : "text-red-500"
+              pnl === null ? "text-slate-400" : positive ? "text-emerald-600" : "text-red-500"
             }`}
           >
-            {positive ? "+" : "-"}
-            {money(Math.abs(pnl))}
+            {pnl === null ? "N/A" : `${positive ? "+" : "-"}${money(Math.abs(pnl))}`}
           </div>
           <div
             className={`mt-1 text-lg ${
-              positive ? "text-emerald-600" : "text-orange-500"
+              pct === null ? "text-slate-400" : positive ? "text-emerald-600" : "text-orange-500"
             }`}
           >
-            {positive ? "+" : ""}
-            {percent(pct)}
+            {pct === null ? "N/A" : `${positive ? "+" : ""}${percent(pct)}`}
+          </div>
+          <div className="mt-2 text-xs text-slate-500">Model P&L</div>
+          <div
+            className={`mt-1 text-sm font-medium ${
+              brokerPnl == null
+                ? "text-slate-400"
+                : brokerPositive
+                  ? "text-emerald-600"
+                  : "text-red-500"
+            }`}
+          >
+            Broker Adj: {brokerPnl == null ? "N/A" : `${brokerPositive ? "+" : "-"}${money(Math.abs(brokerPnl))}`}
+          </div>
+          <div className="text-xs text-slate-500">
+            {brokerPct == null
+              ? "Broker Return: N/A"
+              : `Broker Return: ${brokerPositive ? "+" : ""}${percent(brokerPct)}`}
           </div>
         </div>
         {isOpen ? (
@@ -364,6 +437,19 @@ function PositionRow({
   );
 }
 
+type OptionSnapshot = {
+  currentPrice: number | null;
+  underlyingPrice: number | null;
+  optionSymbol: string | null;
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  mark: number | null;
+  source: string;
+};
+
+type CloudSyncState = "checking" | "connected" | "offline" | "error";
+
 async function fetchOptionSnapshot({
   trade,
   provider,
@@ -372,11 +458,16 @@ async function fetchOptionSnapshot({
   trade: Trade;
   provider: Provider;
   apiKey: string;
-}) {
+}): Promise<OptionSnapshot> {
   if (!provider || provider === "manual") {
     return {
       currentPrice: trade.currentPrice,
-      underlyingPrice: trade.underlyingPrice,
+      underlyingPrice: trade.underlyingPrice ?? null,
+      optionSymbol: null,
+      bid: null,
+      ask: null,
+      last: null,
+      mark: null,
       source: "Manual",
     };
   }
@@ -405,8 +496,13 @@ async function fetchOptionSnapshot({
     const data = await res.json();
 
     return {
-      currentPrice: Number(data?.currentPrice ?? trade.currentPrice),
-      underlyingPrice: Number(data?.underlyingPrice ?? trade.underlyingPrice),
+      currentPrice: data.currentPrice != null ? Number(data.currentPrice) : null,
+      underlyingPrice: data.underlyingPrice != null ? Number(data.underlyingPrice) : null,
+      optionSymbol: data.optionSymbol ?? null,
+      bid: data.bid != null ? Number(data.bid) : null,
+      ask: data.ask != null ? Number(data.ask) : null,
+      last: data.last != null ? Number(data.last) : null,
+      mark: data.mark != null ? Number(data.mark) : null,
       source: data?.source || "Tradier",
     };
   }
@@ -430,6 +526,11 @@ async function fetchOptionSnapshot({
     return {
       currentPrice: trade.currentPrice,
       underlyingPrice: stockLast,
+      optionSymbol: null,
+      bid: null,
+      ask: null,
+      last: null,
+      mark: null,
       source: "Finnhub (stock only)",
     };
   }
@@ -451,6 +552,7 @@ export default function OptionsTradeDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [cloudSyncState, setCloudSyncState] = useState<CloudSyncState>("checking");
   const [error, setError] = useState("");
   const [sourceLabel, setSourceLabel] = useState("Manual");
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -472,32 +574,92 @@ export default function OptionsTradeDashboard() {
 
   const openTrades = filtered.filter((t) => t.status === "OPEN");
   const closedTrades = filtered.filter((t) => t.status === "CLOSED");
-  const wins = closedTrades.filter((t) => contractPnl(t) > 0);
-  const losses = closedTrades.filter((t) => contractPnl(t) < 0);
-  const totalPnl = filtered.reduce((sum, t) => sum + contractPnl(t), 0);
-  const totalCost = filtered.reduce((sum, t) => sum + positionCost(t), 0);
-  const totalValue = filtered.reduce((sum, t) => sum + positionValue(t), 0);
+  const wins = closedTrades.filter((t) => { const p = contractPnl(t); return p !== null && p > 0; });
+  const losses = closedTrades.filter((t) => { const p = contractPnl(t); return p !== null && p < 0; });
+  const totalPnl = filtered.reduce((sum, t) => { const p = contractPnl(t); return p !== null ? sum + p : sum; }, 0);
+  const totalCost = filtered.reduce((sum, t) => { const c = positionCost(t); return c !== null ? sum + c : sum; }, 0);
+  const totalEffectiveCost = filtered.reduce((sum, t) => { const c = effectiveCostBasis(t); return c !== null ? sum + c : sum; }, 0);
+  const totalValue = filtered.reduce((sum, t) => { const v = positionValue(t); return v !== null ? sum + v : sum; }, 0);
+  const totalBrokerPnl = filtered.reduce((sum, t) => { const p = brokerAdjustedPnl(t); return p !== null ? sum + p : sum; }, 0);
   const winRate = closedTrades.length ? (wins.length / closedTrades.length) * 100 : 0;
-  const avgWin = wins.length
-    ? wins.reduce((sum, t) => sum + contractPnl(t), 0) / wins.length
-    : 0;
   const avgLoss = losses.length
-    ? losses.reduce((sum, t) => sum + contractPnl(t), 0) / losses.length
+    ? losses.reduce((sum, t) => { const p = contractPnl(t); return p !== null ? sum + p : sum; }, 0) / losses.length
     : 0;
+  const totalReturn: number | null = totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
+  const totalBrokerReturn: number | null = totalEffectiveCost > 0 ? (totalBrokerPnl / totalEffectiveCost) * 100 : null;
 
-  function syncJson(nextTrades: Trade[]) {
-  setTrades(nextTrades);
-  setRawJson(JSON.stringify(nextTrades, null, 2));
+  const saveTradesRemote = useCallback(async (nextTrades: Trade[], savedAt: string) => {
+    try {
+      const res = await fetch("/api/trades", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ trades: nextTrades, savedAt }),
+      });
+
+      if (res.ok) {
+        setCloudSyncState("connected");
+        return;
+      }
+
+      if (res.status === 503) {
+        setCloudSyncState("offline");
+        return;
+      }
+
+      setCloudSyncState("error");
+    } catch {
+      setCloudSyncState("error");
+    }
+  }, []);
+
+  async function loadTradesRemote() {
+    try {
+      const res = await fetch("/api/trades", { cache: "no-store" });
+      if (!res.ok) {
+        setCloudSyncState("error");
+        return null;
+      }
+
+      const payload = await res.json();
+      if (!payload?.cloud) {
+        setCloudSyncState("offline");
+        return null;
+      }
+
+      setCloudSyncState("connected");
+
+      if (!Array.isArray(payload?.trades)) {
+        return null;
+      }
+
+      const normalized = (payload.trades as Trade[]).map(normalizeTrade);
+      return {
+        trades: normalized,
+        savedAt: typeof payload.savedAt === "string" ? payload.savedAt : null,
+      };
+    } catch {
+      setCloudSyncState("error");
+      return null;
+    }
+  }
+
+  const syncJson = useCallback((nextTrades: Trade[]) => {
+  const normalized = nextTrades.map(normalizeTrade);
+  setTrades(normalized);
+  setRawJson(JSON.stringify(normalized, null, 2));
 
   try {
-  localStorage.setItem("options-dashboard-trades", JSON.stringify(nextTrades));
+  localStorage.setItem("options-dashboard-trades", JSON.stringify(normalized));
   const now = new Date().toISOString();
   localStorage.setItem("options-dashboard-last-saved-at", now);
   setLastSavedAt(now);
+  void saveTradesRemote(normalized, now);
 } catch {
     // ignore storage errors
   }
-}
+}, [saveTradesRemote]);
 
   function loadJson() {
     try {
@@ -505,7 +667,7 @@ export default function OptionsTradeDashboard() {
       if (!Array.isArray(parsed)) {
         throw new Error("JSON must be an array of trades");
       }
-      syncJson(parsed);
+      syncJson((parsed as Trade[]).map(normalizeTrade));
       setError("");
     } catch (err) {
       setError(`Could not load data: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -540,17 +702,13 @@ export default function OptionsTradeDashboard() {
     reader.onload = (e) => {
       try {
         const parsed = JSON.parse(e.target?.result as string);
-        localStorage.setItem(
-  "options-dashboard-trades",
-  JSON.stringify(parsed)
-);
+        if (!Array.isArray(parsed)) {
+          throw new Error("JSON must be an array of trades");
+        }
 
-const now = new Date().toISOString();
-localStorage.setItem("options-dashboard-last-saved-at", now);
-setLastSavedAt(now);
-
-alert("Trades imported successfully");
-window.location.reload();
+        syncJson((parsed as Trade[]).map(normalizeTrade));
+        setError("");
+        alert("Trades imported and synced successfully");
       } catch {
         alert("Invalid file");
       }
@@ -584,10 +742,13 @@ window.location.reload();
       id: Date.now(),
       symbol: newTrade.symbol.trim().toUpperCase(),
       side: newTrade.side,
+      direction: newTrade.direction,
       strike,
       expiration: newTrade.expiration,
       quantity,
       entryPrice,
+      netCostBasis:
+        newTrade.netCostBasis === "" ? null : Number(newTrade.netCostBasis),
       currentPrice,
       exitPrice: null,
       status: "OPEN",
@@ -676,7 +837,7 @@ window.location.reload();
     setError("");
   }
 
-  async function refreshPrices() {
+  const refreshPrices = useCallback(async () => {
     try {
       setRefreshing(true);
       setError("");
@@ -687,22 +848,30 @@ window.location.reload();
 
     const snapshot = await fetchOptionSnapshot({ trade, provider, apiKey });
 
-    if (trade.symbol === "IREN") {
-      console.log("IREN SNAPSHOT DEBUG", {
-        provider,
-        trade,
-        snapshot,
-      });
-    }
-
-    return {
+    const updatedTrade: Trade = {
       ...trade,
-      currentPrice: Number(snapshot.currentPrice ?? trade.currentPrice),
+      currentPrice: snapshot.currentPrice != null ? Number(snapshot.currentPrice) : null,
       underlyingPrice:
         snapshot.underlyingPrice == null
           ? trade.underlyingPrice
           : Number(snapshot.underlyingPrice),
     };
+
+    if (["HIMS", "IREN"].includes(trade.symbol)) {
+      console.log(`[DEBUG ${trade.symbol}]`, {
+        expectedOccSymbol: buildOccSymbol(trade),
+        returnedOptionSymbol: snapshot.optionSymbol ?? "N/A",
+        bid: snapshot.bid,
+        ask: snapshot.ask,
+        last: snapshot.last,
+        mark: snapshot.mark,
+        currentPrice: updatedTrade.currentPrice,
+        pnl: contractPnl(updatedTrade),
+        returnPct: returnPct(updatedTrade),
+      });
+    }
+
+    return updatedTrade;
   })
 );
 
@@ -714,36 +883,58 @@ window.location.reload();
     } finally {
       setRefreshing(false);
     }
-  }
+  }, [apiKey, provider, syncJson, trades]);
 
   useEffect(() => {
-  try {
-    const stored = localStorage.getItem("options-dashboard-trades");
-    const savedAt = localStorage.getItem("options-dashboard-last-saved-at");
+  let mounted = true;
 
-    if (stored) {
-      const parsed = JSON.parse(stored) as Trade[];
-      setTrades(parsed);
-      setRawJson(JSON.stringify(parsed, null, 2));
-    }
+  async function hydrateTrades() {
+    try {
+      const remote = await loadTradesRemote();
+      if (remote && mounted) {
+        setTrades(remote.trades);
+        setRawJson(JSON.stringify(remote.trades, null, 2));
+        if (remote.savedAt) setLastSavedAt(remote.savedAt);
+        localStorage.setItem("options-dashboard-trades", JSON.stringify(remote.trades));
+        if (remote.savedAt) {
+          localStorage.setItem("options-dashboard-last-saved-at", remote.savedAt);
+        }
+        return;
+      }
 
-    if (savedAt) {
-      setLastSavedAt(savedAt);
+      const stored = localStorage.getItem("options-dashboard-trades");
+      const savedAt = localStorage.getItem("options-dashboard-last-saved-at");
+
+      if (stored && mounted) {
+        const parsed = (JSON.parse(stored) as Trade[]).map(normalizeTrade);
+        setTrades(parsed);
+        setRawJson(JSON.stringify(parsed, null, 2));
+      }
+
+      if (savedAt && mounted) {
+        setLastSavedAt(savedAt);
+      }
+    } catch {
+      // ignore parse/storage errors
+    } finally {
+      if (mounted) setHasHydrated(true);
     }
-  } catch {
-    // ignore parse/storage errors
-  } finally {
-    setHasHydrated(true);
   }
+
+  void hydrateTrades();
+
+  return () => {
+    mounted = false;
+  };
 }, []);
 
   useEffect(() => {
     if (!autoRefresh || provider === "manual") return;
     const timer = window.setInterval(() => {
-      refreshPrices();
+      void refreshPrices();
     }, 30000);
     return () => window.clearInterval(timer);
-  }, [autoRefresh, provider, apiKey, trades]);
+  }, [autoRefresh, provider, refreshPrices]);
 
   if (!hasHydrated) {
     return (
@@ -802,22 +993,44 @@ window.location.reload();
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <StatCard title="Open Positions" value={openTrades.length} icon={Activity} />
-          <StatCard title="Portfolio Cost" value={money(totalCost)} icon={DollarSign} />
-          <StatCard title="Current Value" value={money(totalValue)} icon={DollarSign} />
-          <StatCard
-            title="Total P&L"
-            value={money(totalPnl)}
-            icon={totalPnl >= 0 ? TrendingUp : TrendingDown}
-          />
-          <StatCard
-            title="Win Rate"
-            value={percent(winRate)}
-            icon={TrendingUp}
-            hint="Closed trades only"
-          />
-          <StatCard title="Avg Loss" value={money(avgLoss)} icon={TrendingDown} />
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <StatCard title="Open Positions" value={openTrades.length} icon={Activity} />
+            <StatCard title="Portfolio Cost" value={money(totalCost)} icon={DollarSign} />
+            <StatCard title="Current Value" value={money(totalValue)} icon={DollarSign} />
+            <StatCard
+              title="Total P&L"
+              value={money(totalPnl)}
+              icon={totalPnl >= 0 ? TrendingUp : TrendingDown}
+            />
+            <StatCard
+              title="Broker Adj P&L"
+              value={money(totalBrokerPnl)}
+              icon={totalBrokerPnl >= 0 ? TrendingUp : TrendingDown}
+            />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              title="Total Return"
+              value={totalReturn !== null ? percent(totalReturn) : null}
+              icon={totalReturn !== null && totalReturn >= 0 ? TrendingUp : TrendingDown}
+              hint="Model"
+            />
+            <StatCard
+              title="Broker Return"
+              value={totalBrokerReturn !== null ? percent(totalBrokerReturn) : null}
+              icon={totalBrokerReturn !== null && totalBrokerReturn >= 0 ? TrendingUp : TrendingDown}
+              hint="Using cost basis override"
+            />
+            <StatCard
+              title="Win Rate"
+              value={percent(winRate)}
+              icon={TrendingUp}
+              hint="Closed trades only"
+            />
+            <StatCard title="Avg Loss" value={money(avgLoss)} icon={TrendingDown} />
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-3">
@@ -869,6 +1082,23 @@ window.location.reload();
                   </Select>
                 </div>
                 <div>
+                  <Label className="mb-2 block">Direction</Label>
+                  <Select
+                    value={newTrade.direction}
+                    onValueChange={(value) => {
+                      if (value) updateNewTrade("direction", value as PositionDirection);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LONG">LONG</SelectItem>
+                      <SelectItem value="SHORT">SHORT</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
                   <Label className="mb-2 block">Strike</Label>
                   <Input
                     value={newTrade.strike}
@@ -901,6 +1131,16 @@ window.location.reload();
                     value={newTrade.entryPrice}
                     onChange={(e) => updateNewTrade("entryPrice", e.target.value)}
                     placeholder="3.28"
+                    type="number"
+                    step="0.01"
+                  />
+                </div>
+                <div>
+                  <Label className="mb-2 block">Net Cost Basis (optional)</Label>
+                  <Input
+                    value={newTrade.netCostBasis}
+                    onChange={(e) => updateNewTrade("netCostBasis", e.target.value)}
+                    placeholder="343"
                     type="number"
                     step="0.01"
                   />
@@ -995,8 +1235,8 @@ window.location.reload();
         </div>
 <div className="text-sm text-slate-500 mt-2 italic">
   {lastSavedAt
-    ? `Saved locally at ${new Date(lastSavedAt).toLocaleTimeString()} · Browser storage active · Export a backup after major changes`
-    : "Browser storage active · Export a backup after major changes"}
+    ? `Saved locally at ${new Date(lastSavedAt).toLocaleTimeString()} · ${cloudSyncState === "connected" ? "Cloud sync active" : cloudSyncState === "checking" ? "Checking cloud sync" : cloudSyncState === "offline" ? "Cloud sync not configured" : "Cloud sync error"} · Browser storage active`
+    : `${cloudSyncState === "connected" ? "Cloud sync active" : cloudSyncState === "checking" ? "Checking cloud sync" : cloudSyncState === "offline" ? "Cloud sync not configured" : "Cloud sync error"} · Browser storage active`}
 </div>
         <Card className="rounded-2xl shadow-sm">
           <CardHeader>
@@ -1158,8 +1398,8 @@ window.location.reload();
               <CardContent className="space-y-4">
                 <p className="text-sm text-slate-600">
                   Required fields for live pricing: symbol, side, strike, expiration,
-                  quantity, entryPrice, currentPrice, status. Optional: notes, openedAt,
-                  closedAt, underlyingPrice.
+                  quantity, entryPrice, currentPrice, status. Optional: direction,
+                  netCostBasis, notes, openedAt, closedAt, underlyingPrice.
                 </p>
                 <Textarea
                   value={rawJson}
