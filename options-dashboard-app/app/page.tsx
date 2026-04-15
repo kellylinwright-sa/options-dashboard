@@ -553,6 +553,7 @@ export default function OptionsTradeDashboard() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [cloudSyncState, setCloudSyncState] = useState<CloudSyncState>("checking");
+  const [syncingCloud, setSyncingCloud] = useState(false);
   const [error, setError] = useState("");
   const [sourceLabel, setSourceLabel] = useState("Manual");
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -660,6 +661,32 @@ export default function OptionsTradeDashboard() {
     // ignore storage errors
   }
 }, [saveTradesRemote]);
+
+  async function handleForceCloudReload() {
+    try {
+      setSyncingCloud(true);
+      setError("");
+
+      const remote = await loadTradesRemote();
+      if (!remote) {
+        setError("Cloud data is not available. Check cloud sync configuration.");
+        return;
+      }
+
+      setTrades(remote.trades);
+      setRawJson(JSON.stringify(remote.trades, null, 2));
+      localStorage.setItem("options-dashboard-trades", JSON.stringify(remote.trades));
+
+      if (remote.savedAt) {
+        setLastSavedAt(remote.savedAt);
+        localStorage.setItem("options-dashboard-last-saved-at", remote.savedAt);
+      }
+    } catch {
+      setError("Could not reload trades from cloud.");
+    } finally {
+      setSyncingCloud(false);
+    }
+  }
 
   function loadJson() {
     try {
@@ -1038,6 +1065,10 @@ export default function OptionsTradeDashboard() {
 
           <Button variant="outline" onClick={handleExportTrades}>
             Export Trades
+          </Button>
+
+          <Button variant="outline" onClick={handleForceCloudReload} disabled={syncingCloud}>
+            {syncingCloud ? "Syncing Cloud..." : "Force Cloud Reload"}
           </Button>
 
           <label className="cursor-pointer border px-3 py-2 rounded">
