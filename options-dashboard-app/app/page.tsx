@@ -316,11 +316,11 @@ function StatCard({
   hint?: string;
 }) {
   return (
-    <Card className="rounded-2xl border-amber-200 bg-amber-50 shadow-sm">
+    <Card className="rounded-2xl border-amber-300 bg-amber-100 shadow-sm">
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm text-slate-500">{title}</p>
+            <p className="text-base font-bold text-slate-700 underline decoration-2 underline-offset-2">{title}</p>
             <p className="mt-2 text-2xl font-semibold tracking-tight">{value ?? "N/A"}</p>
             {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
           </div>
@@ -349,7 +349,7 @@ function PositionRow({
   const isOpen = trade.status === "OPEN";
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-sky-300 bg-sky-100 p-4">
       <div className="min-w-0">
         <div className="truncate text-lg font-semibold text-blue-900 underline decoration-2 underline-offset-2">
           {trade.symbol} ${trade.strike} {trade.side}
