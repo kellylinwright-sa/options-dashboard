@@ -561,6 +561,22 @@ export default function OptionsTradeDashboard() {
   const [newTrade, setNewTrade] = useState<NewTradeForm>(createEmptyNewTrade());
   const [sellForm, setSellForm] = useState<SellForm>(createEmptySellForm());
 
+  const cloudSyncLabel =
+    cloudSyncState === "connected"
+      ? "Cloud sync active"
+      : cloudSyncState === "checking"
+        ? "Checking cloud sync"
+        : cloudSyncState === "offline"
+          ? "Cloud sync not configured"
+          : "Cloud sync error";
+
+  const cloudHealthBadgeClass =
+    cloudSyncState === "connected"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+      : cloudSyncState === "error"
+        ? "border-red-300 bg-red-50 text-red-700"
+        : "border-amber-300 bg-amber-50 text-amber-800";
+
   const filtered = useMemo(() => {
     return trades.filter((trade) => {
       const hay = `${trade.symbol} ${trade.side} ${trade.notes || ""}`.toLowerCase();
@@ -992,7 +1008,11 @@ export default function OptionsTradeDashboard() {
               only.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col items-start gap-2 md:items-end">
+            <Badge variant="outline" className={cloudHealthBadgeClass}>
+              Cloud Health: {cloudSyncLabel}
+            </Badge>
+            <div className="flex flex-wrap gap-2 md:justify-end">
             <Button
               variant={range === "week" ? "default" : "outline"}
               onClick={() => setRange("week")}
@@ -1017,6 +1037,7 @@ export default function OptionsTradeDashboard() {
             >
               All Time
             </Button>
+            </div>
           </div>
         </div>
 
@@ -1264,11 +1285,26 @@ export default function OptionsTradeDashboard() {
             </DialogContent>
           </Dialog>
         </div>
-<div className="text-sm text-slate-500 mt-2 italic">
-  {lastSavedAt
-    ? `Saved locally at ${new Date(lastSavedAt).toLocaleTimeString()} · ${cloudSyncState === "connected" ? "Cloud sync active" : cloudSyncState === "checking" ? "Checking cloud sync" : cloudSyncState === "offline" ? "Cloud sync not configured" : "Cloud sync error"} · Browser storage active`
-    : `${cloudSyncState === "connected" ? "Cloud sync active" : cloudSyncState === "checking" ? "Checking cloud sync" : cloudSyncState === "offline" ? "Cloud sync not configured" : "Cloud sync error"} · Browser storage active`}
-</div>
+        {cloudSyncState === "offline" ? (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            Cloud sync is not configured, so trades are saved only in this browser.
+            Add BLOB_READ_WRITE_TOKEN in your deployment environment to persist trades across
+            devices and sessions.
+          </div>
+        ) : null}
+
+        {cloudSyncState === "error" ? (
+          <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+            Cloud sync encountered an error. Your latest changes are still saved in browser storage.
+            Export trades as a backup while cloud sync is unavailable.
+          </div>
+        ) : null}
+
+        <div className="mt-2 text-sm italic text-slate-500">
+          {lastSavedAt
+            ? `Saved locally at ${new Date(lastSavedAt).toLocaleTimeString()} · ${cloudSyncLabel} · Browser storage active`
+            : `${cloudSyncLabel} · Browser storage active`}
+        </div>
         <Card className="rounded-2xl shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl">

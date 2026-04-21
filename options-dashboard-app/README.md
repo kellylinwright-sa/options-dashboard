@@ -1,5 +1,17 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Trade Persistence (Important)
+
+Trades are always saved to browser storage. To keep trades across devices, browser resets, and redeploys,
+you must configure cloud sync using Vercel Blob.
+
+1. In Vercel, create/connect a Blob store for this project.
+2. Add `BLOB_READ_WRITE_TOKEN` in Project Settings -> Environment Variables.
+3. Redeploy the project.
+
+If cloud sync is missing, the dashboard will show `Cloud sync not configured`, and trades will only exist
+in the browser where they were entered.
+
 ## Tradier Setup
 
 1. Create a local env file:
