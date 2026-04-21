@@ -1,4 +1,4 @@
-import { list, put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 
 type TradesPayload = {
   trades: unknown[];
@@ -6,27 +6,19 @@ type TradesPayload = {
 };
 
 const BLOB_PATH = "options-dashboard/trades.json";
+const BLOB_ACCESS = process.env.BLOB_ACCESS === "private" ? "private" : "public";
 
 function hasBlobToken() {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
 async function fetchLatestTradesPayload(): Promise<TradesPayload | null> {
-  const listed = await list({ prefix: BLOB_PATH });
-  if (!listed.blobs.length) return null;
+  const blob = await get(BLOB_PATH, {
+    access: BLOB_ACCESS,
+  });
+  if (!blob) return null;
 
-  const newest = listed.blobs
-    .slice()
-    .sort((a, b) =>
-      new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-    )[0];
-
-  if (!newest?.url) return null;
-
-  const res = await fetch(newest.url, { cache: "no-store" });
-  if (!res.ok) return null;
-
-  const json = (await res.json()) as Partial<TradesPayload>;
+  const json = (await blob.blob.json()) as Partial<TradesPayload>;
   if (!Array.isArray(json?.trades)) return null;
 
   return {
@@ -87,7 +79,7 @@ export async function POST(request: Request) {
     };
 
     const result = await put(BLOB_PATH, JSON.stringify(payload), {
-      access: "public",
+      access: BLOB_ACCESS,
       addRandomSuffix: false,
       allowOverwrite: true,
       contentType: "application/json",

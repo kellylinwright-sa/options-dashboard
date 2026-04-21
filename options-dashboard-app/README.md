@@ -7,7 +7,8 @@ you must configure cloud sync using Vercel Blob.
 
 1. In Vercel, create/connect a Blob store for this project.
 2. Add `BLOB_READ_WRITE_TOKEN` in Project Settings -> Environment Variables.
-3. Redeploy the project.
+3. If your Blob store is private, also set `BLOB_ACCESS=private`.
+4. Redeploy the project.
 
 If cloud sync is missing, the dashboard will show `Cloud sync not configured`, and trades will only exist
 in the browser where they were entered.
