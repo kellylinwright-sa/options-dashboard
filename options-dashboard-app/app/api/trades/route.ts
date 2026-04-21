@@ -16,9 +16,9 @@ async function fetchLatestTradesPayload(): Promise<TradesPayload | null> {
   const blob = await get(BLOB_PATH, {
     access: BLOB_ACCESS,
   });
-  if (!blob) return null;
+  if (!blob || blob.statusCode !== 200 || !blob.stream) return null;
 
-  const json = (await blob.blob.json()) as Partial<TradesPayload>;
+  const json = (await new Response(blob.stream).json()) as Partial<TradesPayload>;
   if (!Array.isArray(json?.trades)) return null;
 
   return {
