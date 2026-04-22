@@ -366,7 +366,7 @@ function PositionRow({
           Entry {money((Number(trade.entryPrice) || 0) * 100)}
           {trade.status === "CLOSED"
             ? ` · Exit ${money((Number(trade.exitPrice) || 0) * 100)}`
-            : ` · Mark ${trade.currentPrice != null ? money(trade.currentPrice * 100) : "N/A"}`}
+            : ` · Fair Value ${trade.currentPrice != null ? money(trade.currentPrice * 100) : "N/A"}`}
           {typeof trade.underlyingPrice === "number"
             ? ` · Stock ${money(trade.underlyingPrice)}`
             : ""}
