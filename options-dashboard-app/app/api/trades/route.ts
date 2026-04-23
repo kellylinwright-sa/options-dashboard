@@ -7,9 +7,16 @@ type TradesPayload = {
 
 const BLOB_PATH = "options-dashboard/trades.json";
 const BLOB_ACCESS = process.env.BLOB_ACCESS === "private" ? "private" : "public";
+const CLOUD_WRITE_KEY = process.env.CLOUD_WRITE_KEY?.trim() || "";
 
 function hasBlobToken() {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+}
+
+function hasValidWriteKey(request: Request) {
+  if (!CLOUD_WRITE_KEY) return true;
+  const provided = request.headers.get("x-cloud-write-key")?.trim() || "";
+  return provided.length > 0 && provided === CLOUD_WRITE_KEY;
 }
 
 async function fetchLatestTradesPayload(): Promise<TradesPayload | null> {
@@ -62,6 +69,16 @@ export async function POST(request: Request) {
             "Cloud sync is not configured. Set BLOB_READ_WRITE_TOKEN in your environment.",
         },
         { status: 503 }
+      );
+    }
+
+    if (!hasValidWriteKey(request)) {
+      return Response.json(
+        {
+          error:
+            "Write access denied. Set CLOUD_WRITE_KEY and send it in x-cloud-write-key.",
+        },
+        { status: 403 }
       );
     }
 

@@ -31,6 +31,8 @@ import {
   Activity,
   Wifi,
   RefreshCw,
+  Lock,
+  LockOpen,
 } from "lucide-react";
 
 const seedTrades: Trade[] = [
@@ -448,7 +450,9 @@ type OptionSnapshot = {
   source: string;
 };
 
-type CloudSyncState = "checking" | "connected" | "offline" | "error";
+type CloudSyncState = "checking" | "connected" | "readonly" | "offline" | "error";
+
+const CLOUD_WRITE_KEY_STORAGE_KEY = "options-dashboard-cloud-write-key";
 
 async function fetchOptionSnapshot({
   trade,
@@ -553,6 +557,7 @@ export default function OptionsTradeDashboard() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [cloudSyncState, setCloudSyncState] = useState<CloudSyncState>("checking");
+  const [cloudWriteKey, setCloudWriteKey] = useState("");
   const [syncingCloud, setSyncingCloud] = useState(false);
   const [error, setError] = useState("");
   const [sourceLabel, setSourceLabel] = useState("Manual");
@@ -564,6 +569,8 @@ export default function OptionsTradeDashboard() {
   const cloudSyncLabel =
     cloudSyncState === "connected"
       ? "Cloud sync active"
+      : cloudSyncState === "readonly"
+        ? "Cloud sync read-only"
       : cloudSyncState === "checking"
         ? "Checking cloud sync"
         : cloudSyncState === "offline"
@@ -573,9 +580,35 @@ export default function OptionsTradeDashboard() {
   const cloudHealthBadgeClass =
     cloudSyncState === "connected"
       ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+      : cloudSyncState === "readonly"
+        ? "border-blue-300 bg-blue-50 text-blue-700"
       : cloudSyncState === "error"
         ? "border-red-300 bg-red-50 text-red-700"
         : "border-amber-300 bg-amber-50 text-amber-800";
+
+  const hasCloudWriteKey = cloudWriteKey.trim().length > 0;
+  const editLockLabel =
+    cloudSyncState === "offline"
+      ? "Lock unavailable"
+      : cloudSyncState === "checking"
+        ? "Lock checking"
+        : cloudSyncState === "readonly"
+          ? "Locked"
+          : hasCloudWriteKey
+            ? "Unlocked"
+            : "Locked";
+  const EditLockIcon =
+    cloudSyncState === "offline" || cloudSyncState === "checking" || cloudSyncState === "readonly" || !hasCloudWriteKey
+      ? Lock
+      : LockOpen;
+  const editLockBadgeClass =
+    cloudSyncState === "offline"
+      ? "border-amber-300 bg-amber-50 text-amber-800"
+      : cloudSyncState === "checking"
+        ? "border-slate-300 bg-slate-50 text-slate-700"
+        : cloudSyncState === "readonly" || !hasCloudWriteKey
+          ? "border-blue-300 bg-blue-50 text-blue-700"
+          : "border-emerald-300 bg-emerald-50 text-emerald-700";
 
   const filtered = useMemo(() => {
     return trades.filter((trade) => {
@@ -607,16 +640,23 @@ export default function OptionsTradeDashboard() {
 
   const saveTradesRemote = useCallback(async (nextTrades: Trade[], savedAt: string) => {
     try {
+      const trimmedWriteKey = cloudWriteKey.trim();
       const res = await fetch("/api/trades", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(trimmedWriteKey ? { "x-cloud-write-key": trimmedWriteKey } : {}),
         },
         body: JSON.stringify({ trades: nextTrades, savedAt }),
       });
 
       if (res.ok) {
         setCloudSyncState("connected");
+        return;
+      }
+
+      if (res.status === 403) {
+        setCloudSyncState("readonly");
         return;
       }
 
@@ -629,7 +669,7 @@ export default function OptionsTradeDashboard() {
     } catch {
       setCloudSyncState("error");
     }
-  }, []);
+  }, [cloudWriteKey]);
 
   async function loadTradesRemote() {
     try {
@@ -645,7 +685,7 @@ export default function OptionsTradeDashboard() {
         return null;
       }
 
-      setCloudSyncState("connected");
+      setCloudSyncState((current) => (current === "readonly" ? "readonly" : "connected"));
 
       if (!Array.isArray(payload?.trades)) {
         return null;
@@ -947,6 +987,7 @@ export default function OptionsTradeDashboard() {
 
       const stored = localStorage.getItem("options-dashboard-trades");
       const savedAt = localStorage.getItem("options-dashboard-last-saved-at");
+      const storedCloudWriteKey = localStorage.getItem(CLOUD_WRITE_KEY_STORAGE_KEY);
 
       if (stored && mounted) {
         const parsed = (JSON.parse(stored) as Trade[]).map(normalizeTrade);
@@ -956,6 +997,10 @@ export default function OptionsTradeDashboard() {
 
       if (savedAt && mounted) {
         setLastSavedAt(savedAt);
+      }
+
+      if (storedCloudWriteKey && mounted) {
+        setCloudWriteKey(storedCloudWriteKey);
       }
     } catch {
       // ignore parse/storage errors
@@ -970,6 +1015,20 @@ export default function OptionsTradeDashboard() {
     mounted = false;
   };
 }, []);
+
+  useEffect(() => {
+    if (!hasHydrated) return;
+
+    try {
+      if (cloudWriteKey.trim()) {
+        localStorage.setItem(CLOUD_WRITE_KEY_STORAGE_KEY, cloudWriteKey.trim());
+      } else {
+        localStorage.removeItem(CLOUD_WRITE_KEY_STORAGE_KEY);
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [cloudWriteKey, hasHydrated]);
 
   useEffect(() => {
     if (!autoRefresh || provider === "manual") return;
@@ -1011,6 +1070,10 @@ export default function OptionsTradeDashboard() {
           <div className="flex flex-col items-start gap-2 md:items-end">
             <Badge variant="outline" className={cloudHealthBadgeClass}>
               Cloud Health: {cloudSyncLabel}
+            </Badge>
+            <Badge variant="outline" className={editLockBadgeClass}>
+              <EditLockIcon className="mr-1 h-3.5 w-3.5" />
+              Edit: {editLockLabel}
             </Badge>
             <div className="flex flex-wrap gap-2 md:justify-end">
             <Button
@@ -1091,6 +1154,26 @@ export default function OptionsTradeDashboard() {
           <Button variant="outline" onClick={handleForceCloudReload} disabled={syncingCloud}>
             {syncingCloud ? "Syncing Cloud..." : "Force Cloud Reload"}
           </Button>
+
+          <div className="w-full max-w-sm">
+            <Label className="mb-2 block">Cloud edit key (owner only)</Label>
+            <div className="flex gap-2">
+              <Input
+                value={cloudWriteKey}
+                onChange={(e) => setCloudWriteKey(e.target.value)}
+                placeholder="Enter CLOUD_WRITE_KEY to enable cloud edits"
+                type="password"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCloudWriteKey("")}
+                disabled={!hasCloudWriteKey}
+              >
+                Clear Key
+              </Button>
+            </div>
+          </div>
 
           <label className="cursor-pointer border px-3 py-2 rounded">
             Import Trades
@@ -1290,6 +1373,13 @@ export default function OptionsTradeDashboard() {
             Cloud sync is not configured, so trades are saved only in this browser.
             Add BLOB_READ_WRITE_TOKEN in your deployment environment to persist trades across
             devices and sessions.
+          </div>
+        ) : null}
+
+        {cloudSyncState === "readonly" ? (
+          <div className="rounded-xl border border-blue-300 bg-blue-50 p-3 text-sm text-blue-800">
+            Cloud data is shared in read-only mode. Enter your owner key in Cloud edit key to
+            re-enable writes from this browser.
           </div>
         ) : null}
 
