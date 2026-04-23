@@ -130,7 +130,6 @@ type Trade = {
   quantity: number;
   entryPrice: number;
   direction?: PositionDirection;
-  netCostBasis?: number | null;
   currentPrice: number | null;
   exitPrice: number | null;
   status: TradeStatus;
@@ -148,7 +147,6 @@ type NewTradeForm = {
   expiration: string;
   quantity: number | string;
   entryPrice: string;
-  netCostBasis: string;
   currentPrice: string;
   notes: string;
   underlyingPrice: string;
@@ -167,12 +165,6 @@ function positionCost(trade: Trade): number | null {
   const qty = Number(trade.quantity);
   if (!Number.isFinite(entry) || entry <= 0 || !Number.isFinite(qty) || qty <= 0) return null;
   return entry * 100 * qty;
-}
-
-function effectiveCostBasis(trade: Trade): number | null {
-  const override = Number(trade.netCostBasis);
-  if (Number.isFinite(override) && override > 0) return override;
-  return positionCost(trade);
 }
 
 function positionValue(trade: Trade): number | null {
@@ -208,24 +200,10 @@ function contractPnl(trade: Trade): number | null {
 }
 
 function returnPct(trade: Trade): number | null {
-  const base = effectiveCostBasis(trade);
+  const base = positionCost(trade);
   const pnl = contractPnl(trade);
   if (base == null || base === 0 || pnl == null) return null;
   return (pnl / base) * 100;
-}
-
-function brokerAdjustedPnl(trade: Trade): number | null {
-  const basis = effectiveCostBasis(trade);
-  const value = positionValue(trade);
-  if (basis == null || value == null) return null;
-  return (trade.direction ?? "LONG") === "SHORT" ? basis - value : value - basis;
-}
-
-function brokerAdjustedReturnPct(trade: Trade): number | null {
-  const basis = effectiveCostBasis(trade);
-  const pnl = brokerAdjustedPnl(trade);
-  if (basis == null || basis === 0 || pnl == null) return null;
-  return (pnl / basis) * 100;
 }
 
 function normalizeTrade(raw: Trade): Trade {
@@ -233,12 +211,6 @@ function normalizeTrade(raw: Trade): Trade {
     ...raw,
     symbol: String(raw.symbol || "").toUpperCase(),
     direction: raw.direction === "SHORT" ? "SHORT" : "LONG",
-    netCostBasis:
-      raw.netCostBasis == null
-        ? null
-        : Number.isFinite(Number(raw.netCostBasis))
-          ? Number(raw.netCostBasis)
-          : null,
   };
 }
 
@@ -289,7 +261,6 @@ function createEmptyNewTrade(): NewTradeForm {
     expiration: "",
     quantity: 1,
     entryPrice: "",
-    netCostBasis: "",
     currentPrice: "",
     notes: "",
     underlyingPrice: "",
@@ -347,9 +318,6 @@ function PositionRow({
   const pnl = contractPnl(trade);
   const positive = pnl !== null && pnl >= 0;
   const pct = returnPct(trade);
-  const brokerPnl = brokerAdjustedPnl(trade);
-  const brokerPct = brokerAdjustedReturnPct(trade);
-  const brokerPositive = brokerPnl !== null && brokerPnl >= 0;
   const isOpen = trade.status === "OPEN";
 
   return (
@@ -414,22 +382,6 @@ function PositionRow({
             {pct === null ? "N/A" : `${positive ? "+" : ""}${percent(pct)}`}
           </div>
           <div className="mt-2 text-xs text-slate-500">Model P&L</div>
-          <div
-            className={`mt-1 text-sm font-medium ${
-              brokerPnl == null
-                ? "text-slate-400"
-                : brokerPositive
-                  ? "text-emerald-600"
-                  : "text-red-500"
-            }`}
-          >
-            Broker Adj: {brokerPnl == null ? "N/A" : `${brokerPositive ? "+" : "-"}${money(Math.abs(brokerPnl))}`}
-          </div>
-          <div className="text-xs text-slate-500">
-            {brokerPct == null
-              ? "Broker Return: N/A"
-              : `Broker Return: ${brokerPositive ? "+" : ""}${percent(brokerPct)}`}
-          </div>
         </div>
         {isOpen ? (
           <Button variant="outline" onClick={() => onSell(trade.id)} disabled={!canEdit}>
@@ -632,15 +584,12 @@ export default function OptionsTradeDashboard() {
   const losses = closedTrades.filter((t) => { const p = contractPnl(t); return p !== null && p < 0; });
   const totalPnl = filtered.reduce((sum, t) => { const p = contractPnl(t); return p !== null ? sum + p : sum; }, 0);
   const totalCost = filtered.reduce((sum, t) => { const c = positionCost(t); return c !== null ? sum + c : sum; }, 0);
-  const totalEffectiveCost = filtered.reduce((sum, t) => { const c = effectiveCostBasis(t); return c !== null ? sum + c : sum; }, 0);
   const totalValue = filtered.reduce((sum, t) => { const v = positionValue(t); return v !== null ? sum + v : sum; }, 0);
-  const totalBrokerPnl = filtered.reduce((sum, t) => { const p = brokerAdjustedPnl(t); return p !== null ? sum + p : sum; }, 0);
   const winRate = closedTrades.length ? (wins.length / closedTrades.length) * 100 : 0;
   const avgLoss = losses.length
     ? losses.reduce((sum, t) => { const p = contractPnl(t); return p !== null ? sum + p : sum; }, 0) / losses.length
     : 0;
   const totalReturn: number | null = totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
-  const totalBrokerReturn: number | null = totalEffectiveCost > 0 ? (totalBrokerPnl / totalEffectiveCost) * 100 : null;
 
   const saveTradesRemote = useCallback(async (nextTrades: Trade[], savedAt: string) => {
     try {
@@ -855,8 +804,6 @@ export default function OptionsTradeDashboard() {
       expiration: newTrade.expiration,
       quantity,
       entryPrice,
-      netCostBasis:
-        newTrade.netCostBasis === "" ? null : Number(newTrade.netCostBasis),
       currentPrice,
       exitPrice: null,
       status: "OPEN",
@@ -1157,7 +1104,7 @@ export default function OptionsTradeDashboard() {
         </div>
 
         <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <StatCard title="Open Positions" value={openTrades.length} icon={Activity} />
             <StatCard title="Portfolio Cost" value={money(totalCost)} icon={DollarSign} />
             <StatCard title="Current Value" value={money(totalValue)} icon={DollarSign} />
@@ -1166,25 +1113,14 @@ export default function OptionsTradeDashboard() {
               value={money(totalPnl)}
               icon={totalPnl >= 0 ? TrendingUp : TrendingDown}
             />
-            <StatCard
-              title="Broker Adj P&L"
-              value={money(totalBrokerPnl)}
-              icon={totalBrokerPnl >= 0 ? TrendingUp : TrendingDown}
-            />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <StatCard
               title="Total Return"
               value={totalReturn !== null ? percent(totalReturn) : null}
               icon={totalReturn !== null && totalReturn >= 0 ? TrendingUp : TrendingDown}
               hint="Model"
-            />
-            <StatCard
-              title="Broker Return"
-              value={totalBrokerReturn !== null ? percent(totalBrokerReturn) : null}
-              icon={totalBrokerReturn !== null && totalBrokerReturn >= 0 ? TrendingUp : TrendingDown}
-              hint="Using cost basis override"
             />
             <StatCard
               title="Win Rate"
@@ -1196,7 +1132,7 @@ export default function OptionsTradeDashboard() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-300 bg-slate-100 p-4 text-slate-900 font-sans">
           <Button onClick={() => setIsAddOpen(true)} disabled={!hasCloudWriteKey}>
             Add New Position
           </Button>
@@ -1209,10 +1145,11 @@ export default function OptionsTradeDashboard() {
             {syncingCloud ? "Syncing Cloud..." : "Force Cloud Reload"}
           </Button>
 
-          <div className="w-full max-w-sm">
-            <Label className="mb-2 block">Cloud edit key (owner only)</Label>
+          <div className="w-full max-w-sm md:mx-1">
+            <Label className="mb-2 block text-slate-800">Cloud edit key (owner only)</Label>
             <div className="flex gap-2">
               <Input
+                className="text-slate-900 placeholder:text-slate-500"
                 value={cloudWriteKey}
                 onChange={(e) => setCloudWriteKey(e.target.value)}
                 placeholder="Enter CLOUD_WRITE_KEY to enable cloud edits"
@@ -1230,7 +1167,7 @@ export default function OptionsTradeDashboard() {
           </div>
 
           <label
-            className={`rounded border px-3 py-2 ${
+            className={`inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 ${
               hasCloudWriteKey ? "cursor-pointer" : "cursor-not-allowed opacity-60"
             }`}
           >
@@ -1325,16 +1262,6 @@ export default function OptionsTradeDashboard() {
                     value={newTrade.entryPrice}
                     onChange={(e) => updateNewTrade("entryPrice", e.target.value)}
                     placeholder="3.28"
-                    type="number"
-                    step="0.01"
-                  />
-                </div>
-                <div>
-                  <Label className="mb-2 block">Net Cost Basis (optional)</Label>
-                  <Input
-                    value={newTrade.netCostBasis}
-                    onChange={(e) => updateNewTrade("netCostBasis", e.target.value)}
-                    placeholder="343"
                     type="number"
                     step="0.01"
                   />
@@ -1629,7 +1556,7 @@ export default function OptionsTradeDashboard() {
                 <p className="text-sm text-slate-600">
                   Required fields for live pricing: symbol, side, strike, expiration,
                   quantity, entryPrice, currentPrice, status. Optional: direction,
-                  netCostBasis, notes, openedAt, closedAt, underlyingPrice.
+                  notes, openedAt, closedAt, underlyingPrice.
                 </p>
                 <Textarea
                   value={rawJson}
