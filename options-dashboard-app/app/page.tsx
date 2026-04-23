@@ -338,9 +338,11 @@ function StatCard({
 function PositionRow({
   trade,
   onSell,
+  canEdit,
 }: {
   trade: Trade;
   onSell: (tradeId: number) => void;
+  canEdit: boolean;
 }) {
   const pnl = contractPnl(trade);
   const positive = pnl !== null && pnl >= 0;
@@ -430,7 +432,7 @@ function PositionRow({
           </div>
         </div>
         {isOpen ? (
-          <Button variant="outline" onClick={() => onSell(trade.id)}>
+          <Button variant="outline" onClick={() => onSell(trade.id)} disabled={!canEdit}>
             Sell / Close
           </Button>
         ) : null}
@@ -451,6 +453,7 @@ type OptionSnapshot = {
 };
 
 type CloudSyncState = "checking" | "connected" | "readonly" | "offline" | "error";
+type DashboardTab = "positions" | "closed" | "data";
 
 const CLOUD_WRITE_KEY_STORAGE_KEY = "options-dashboard-cloud-write-key";
 
@@ -545,6 +548,7 @@ async function fetchOptionSnapshot({
 export default function OptionsTradeDashboard() {
   const [range, setRange] = useState("all");
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<DashboardTab>("positions");
 
   const [trades, setTrades] = useState<Trade[]>(seedTrades);
   const [rawJson, setRawJson] = useState(JSON.stringify(seedTrades, null, 2));
@@ -703,20 +707,28 @@ export default function OptionsTradeDashboard() {
   }
 
   const syncJson = useCallback((nextTrades: Trade[]) => {
-  const normalized = nextTrades.map(normalizeTrade);
-  setTrades(normalized);
-  setRawJson(JSON.stringify(normalized, null, 2));
+    if (!hasCloudWriteKey) {
+      setCloudSyncState("readonly");
+      setError("Enter your owner key to edit dashboard data.");
+      return false;
+    }
 
-  try {
-  localStorage.setItem("options-dashboard-trades", JSON.stringify(normalized));
-  const now = new Date().toISOString();
-  localStorage.setItem("options-dashboard-last-saved-at", now);
-  setLastSavedAt(now);
-  void saveTradesRemote(normalized, now);
-} catch {
-    // ignore storage errors
-  }
-}, [saveTradesRemote]);
+    const normalized = nextTrades.map(normalizeTrade);
+    setTrades(normalized);
+    setRawJson(JSON.stringify(normalized, null, 2));
+
+    try {
+      localStorage.setItem("options-dashboard-trades", JSON.stringify(normalized));
+      const now = new Date().toISOString();
+      localStorage.setItem("options-dashboard-last-saved-at", now);
+      setLastSavedAt(now);
+      void saveTradesRemote(normalized, now);
+      return true;
+    } catch {
+      // ignore storage errors
+      return false;
+    }
+  }, [hasCloudWriteKey, saveTradesRemote]);
 
   async function handleForceCloudReload() {
     try {
@@ -750,7 +762,7 @@ export default function OptionsTradeDashboard() {
       if (!Array.isArray(parsed)) {
         throw new Error("JSON must be an array of trades");
       }
-      syncJson((parsed as Trade[]).map(normalizeTrade));
+      if (!syncJson((parsed as Trade[]).map(normalizeTrade))) return;
       setError("");
     } catch (err) {
       setError(`Could not load data: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -777,6 +789,13 @@ export default function OptionsTradeDashboard() {
   }
 
   function handleImportTrades(event: React.ChangeEvent<HTMLInputElement>) {
+    if (!hasCloudWriteKey) {
+      setCloudSyncState("readonly");
+      setError("Enter your owner key to import trades.");
+      event.target.value = "";
+      return;
+    }
+
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -789,7 +808,7 @@ export default function OptionsTradeDashboard() {
           throw new Error("JSON must be an array of trades");
         }
 
-        syncJson((parsed as Trade[]).map(normalizeTrade));
+        if (!syncJson((parsed as Trade[]).map(normalizeTrade))) return;
         setError("");
         alert("Trades imported and synced successfully");
       } catch {
@@ -809,6 +828,12 @@ export default function OptionsTradeDashboard() {
   }
 
   function handleAddTrade() {
+    if (!hasCloudWriteKey) {
+      setCloudSyncState("readonly");
+      setError("Enter your owner key to add positions.");
+      return;
+    }
+
     const quantity = Number(newTrade.quantity);
     const strike = Number(newTrade.strike);
     const entryPrice = Number(newTrade.entryPrice);
@@ -845,13 +870,19 @@ export default function OptionsTradeDashboard() {
       underlyingPrice,
     };
 
-    syncJson([nextTrade, ...trades]);
+    if (!syncJson([nextTrade, ...trades])) return;
     setNewTrade(createEmptyNewTrade());
     setIsAddOpen(false);
     setError("");
   }
 
   function openSellDialog(tradeId: number) {
+    if (!hasCloudWriteKey) {
+      setCloudSyncState("readonly");
+      setError("Enter your owner key to close positions.");
+      return;
+    }
+
     const trade = trades.find((t) => t.id === tradeId);
     if (!trade) return;
 
@@ -866,6 +897,12 @@ export default function OptionsTradeDashboard() {
   }
 
   function handleSellTrade() {
+    if (!hasCloudWriteKey) {
+      setCloudSyncState("readonly");
+      setError("Enter your owner key to close positions.");
+      return;
+    }
+
     const trade = trades.find((t) => t.id === sellForm.tradeId);
     if (!trade) {
       setError("Could not find that position.");
@@ -914,7 +951,7 @@ export default function OptionsTradeDashboard() {
       return [updatedOpen, closedRecord];
     });
 
-    syncJson(nextTrades);
+    if (!syncJson(nextTrades)) return;
     setSellForm(createEmptySellForm());
     setIsSellOpen(false);
     setError("");
@@ -922,6 +959,12 @@ export default function OptionsTradeDashboard() {
 
   const refreshPrices = useCallback(async () => {
     try {
+      if (!hasCloudWriteKey) {
+        setCloudSyncState("readonly");
+        setError("Enter your owner key to update live prices.");
+        return;
+      }
+
       setRefreshing(true);
       setError("");
 
@@ -958,7 +1001,7 @@ export default function OptionsTradeDashboard() {
   })
 );
 
-      syncJson(updated);
+      if (!syncJson(updated)) return;
       setSourceLabel(getProviderLabel(provider));
       setLastRefresh(new Date());
     } catch (err) {
@@ -966,7 +1009,7 @@ export default function OptionsTradeDashboard() {
     } finally {
       setRefreshing(false);
     }
-  }, [apiKey, provider, syncJson, trades]);
+  }, [apiKey, hasCloudWriteKey, provider, syncJson, trades]);
 
   useEffect(() => {
   let mounted = true;
@@ -1029,6 +1072,15 @@ export default function OptionsTradeDashboard() {
       // ignore storage errors
     }
   }, [cloudWriteKey, hasHydrated]);
+
+  useEffect(() => {
+    if (hasCloudWriteKey) return;
+    setIsAddOpen(false);
+    setIsSellOpen(false);
+    setAutoRefresh(false);
+    if (activeTab !== "data") return;
+    setActiveTab("positions");
+  }, [activeTab, hasCloudWriteKey]);
 
   useEffect(() => {
     if (!autoRefresh || provider === "manual") return;
@@ -1145,7 +1197,9 @@ export default function OptionsTradeDashboard() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <Button onClick={() => setIsAddOpen(true)}>Add New Position</Button>
+          <Button onClick={() => setIsAddOpen(true)} disabled={!hasCloudWriteKey}>
+            Add New Position
+          </Button>
 
           <Button variant="outline" onClick={handleExportTrades}>
             Export Trades
@@ -1175,13 +1229,18 @@ export default function OptionsTradeDashboard() {
             </div>
           </div>
 
-          <label className="cursor-pointer border px-3 py-2 rounded">
+          <label
+            className={`rounded border px-3 py-2 ${
+              hasCloudWriteKey ? "cursor-pointer" : "cursor-not-allowed opacity-60"
+            }`}
+          >
             Import Trades
             <input
               type="file"
               accept="application/json"
               onChange={handleImportTrades}
               className="hidden"
+              disabled={!hasCloudWriteKey}
             />
           </label>
 
@@ -1321,7 +1380,7 @@ export default function OptionsTradeDashboard() {
                 <Button variant="outline" onClick={() => setIsAddOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={handleAddTrade}>Save Position</Button>
+                <Button onClick={handleAddTrade} disabled={!hasCloudWriteKey}>Save Position</Button>
               </div>
             </DialogContent>
           </Dialog>
@@ -1363,7 +1422,7 @@ export default function OptionsTradeDashboard() {
                 <Button variant="outline" onClick={() => setIsSellOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={handleSellTrade}>Confirm Sale</Button>
+                <Button onClick={handleSellTrade} disabled={!hasCloudWriteKey}>Confirm Sale</Button>
               </div>
             </DialogContent>
           </Dialog>
@@ -1377,7 +1436,7 @@ export default function OptionsTradeDashboard() {
         ) : null}
 
         {cloudSyncState === "readonly" ? (
-          <div className="rounded-xl border border-blue-300 bg-blue-50 p-3 text-sm text-blue-800">
+          <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">
             Cloud data is shared in read-only mode. Enter your owner key in Cloud edit key to
             re-enable writes from this browser.
           </div>
@@ -1443,7 +1502,7 @@ export default function OptionsTradeDashboard() {
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-3">
-                <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+                <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} disabled={!hasCloudWriteKey} />
                 <Label>Auto-refresh every 30 seconds</Label>
               </div>
               <div className="flex flex-wrap items-center gap-3">
@@ -1453,7 +1512,7 @@ export default function OptionsTradeDashboard() {
                     Last refresh: {lastRefresh.toLocaleTimeString()}
                   </span>
                 ) : null}
-                <Button onClick={refreshPrices} disabled={refreshing}>
+                <Button onClick={refreshPrices} disabled={refreshing || !hasCloudWriteKey}>
                   <RefreshCw
                     className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
                   />
@@ -1510,17 +1569,26 @@ export default function OptionsTradeDashboard() {
           </CardContent>
         </Card>
 
-        <Tabs defaultValue="positions" className="space-y-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as DashboardTab)}
+          className="space-y-4"
+        >
           <TabsList>
             <TabsTrigger value="positions">Current Positions</TabsTrigger>
             <TabsTrigger value="closed">Closed Trades</TabsTrigger>
-            <TabsTrigger value="data">Edit Your Data</TabsTrigger>
+            <TabsTrigger value="data" disabled={!hasCloudWriteKey}>Edit Your Data</TabsTrigger>
           </TabsList>
 
           <TabsContent value="positions" className="space-y-3">
             {openTrades.length ? (
               openTrades.map((trade) => (
-                <PositionRow key={trade.id} trade={trade} onSell={openSellDialog} />
+                <PositionRow
+                  key={trade.id}
+                  trade={trade}
+                  onSell={openSellDialog}
+                  canEdit={hasCloudWriteKey}
+                />
               ))
             ) : (
               <Card>
@@ -1534,7 +1602,12 @@ export default function OptionsTradeDashboard() {
           <TabsContent value="closed" className="space-y-3">
             {closedTrades.length ? (
               closedTrades.map((trade) => (
-                <PositionRow key={trade.id} trade={trade} onSell={openSellDialog} />
+                <PositionRow
+                  key={trade.id}
+                  trade={trade}
+                  onSell={openSellDialog}
+                  canEdit={hasCloudWriteKey}
+                />
               ))
             ) : (
               <Card>
@@ -1562,13 +1635,15 @@ export default function OptionsTradeDashboard() {
                   value={rawJson}
                   onChange={(e) => setRawJson(e.target.value)}
                   className="min-h-[360px] font-mono text-xs"
+                  disabled={!hasCloudWriteKey}
                 />
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={loadJson}>Load Positions</Button>
+                  <Button onClick={loadJson} disabled={!hasCloudWriteKey}>Load Positions</Button>
                   <Button
                     variant="outline"
+                    disabled={!hasCloudWriteKey}
                     onClick={() => {
-                      syncJson(seedTrades);
+                      if (!syncJson(seedTrades)) return;
                       setError("");
                     }}
                   >
