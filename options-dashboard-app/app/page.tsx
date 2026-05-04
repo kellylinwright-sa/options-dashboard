@@ -408,6 +408,7 @@ type CloudSyncState = "checking" | "connected" | "readonly" | "offline" | "error
 type DashboardTab = "positions" | "closed" | "data";
 
 const CLOUD_WRITE_KEY_STORAGE_KEY = "options-dashboard-cloud-write-key";
+const STOCKS_SHEET_URL = "https://docs.google.com/spreadsheets/d/16tX-XFNUNGPL5sIv0fQVVMa-BtIEpuReSOgf3-ZJTKU/edit?usp=sharing";
 
 async function fetchOptionSnapshot({
   trade,
@@ -735,6 +736,16 @@ export default function OptionsTradeDashboard() {
     a.click();
 
     URL.revokeObjectURL(url);
+  }
+
+  function handleOpenStocksSheet() {
+    if (!hasCloudWriteKey) {
+      setCloudSyncState("readonly");
+      setError("Enter your owner key to unlock access to the stocks sheet.");
+      return;
+    }
+
+    window.open(STOCKS_SHEET_URL, "_blank", "noopener,noreferrer");
   }
 
   function handleImportTrades(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1139,6 +1150,10 @@ export default function OptionsTradeDashboard() {
 
           <Button variant="outline" onClick={handleExportTrades}>
             Export Trades
+          </Button>
+
+          <Button variant="outline" onClick={handleOpenStocksSheet} disabled={!hasCloudWriteKey}>
+            Open Stocks Sheet
           </Button>
 
           <Button variant="outline" onClick={handleForceCloudReload} disabled={syncingCloud}>
