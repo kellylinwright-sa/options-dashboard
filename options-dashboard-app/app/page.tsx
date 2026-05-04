@@ -33,6 +33,7 @@ import {
   RefreshCw,
   Lock,
   LockOpen,
+  ExternalLink,
 } from "lucide-react";
 
 const seedTrades: Trade[] = [
@@ -289,16 +290,16 @@ function StatCard({
   hint?: string;
 }) {
   return (
-    <Card className="rounded-2xl border-amber-300 bg-amber-100 shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-4">
+    <Card className="rounded-xl border-amber-300 bg-amber-100 shadow-sm">
+      <CardContent className="p-3">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-base font-bold text-slate-700 underline decoration-2 underline-offset-2">{title}</p>
-            <p className="mt-2 text-2xl font-semibold tracking-tight">{value ?? "N/A"}</p>
+            <p className="text-sm font-bold text-slate-700 underline decoration-2 underline-offset-2">{title}</p>
+            <p className="mt-1 text-xl font-semibold tracking-tight">{value ?? "N/A"}</p>
             {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
           </div>
-          <div className="rounded-2xl border p-2">
-            <Icon className="h-5 w-5" />
+          <div className="rounded-xl border p-1.5">
+            <Icon className="h-4 w-4" />
           </div>
         </div>
       </CardContent>
@@ -408,7 +409,7 @@ type CloudSyncState = "checking" | "connected" | "readonly" | "offline" | "error
 type DashboardTab = "positions" | "closed" | "data";
 
 const CLOUD_WRITE_KEY_STORAGE_KEY = "options-dashboard-cloud-write-key";
-const STOCKS_SHEET_URL = "https://docs.google.com/spreadsheets/d/16tX-XFNUNGPL5sIv0fQVVMa-BtIEpuReSOgf3-ZJTKU/edit?gid=942797450#gid=942797450";
+const MY_STOCK_PORTFOLIO_URL = "https://docs.google.com/spreadsheets/d/16tX-XFNUNGPL5sIv0fQVVMa-BtIEpuReSOgf3-ZJTKU/edit?pli=1&gid=942797450#gid=942797450";
 
 async function fetchOptionSnapshot({
   trade,
@@ -736,16 +737,6 @@ export default function OptionsTradeDashboard() {
     a.click();
 
     URL.revokeObjectURL(url);
-  }
-
-  function handleOpenStocksSheet() {
-    if (!hasCloudWriteKey) {
-      setCloudSyncState("readonly");
-      setError("Enter your owner key to unlock access to the stocks sheet.");
-      return;
-    }
-
-    window.open(STOCKS_SHEET_URL, "_blank", "noopener,noreferrer");
   }
 
   function handleImportTrades(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1115,7 +1106,7 @@ export default function OptionsTradeDashboard() {
         </div>
 
         <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard title="Open Positions" value={openTrades.length} icon={Activity} />
             <StatCard title="Portfolio Cost" value={money(totalCost)} icon={DollarSign} />
             <StatCard title="Current Value" value={money(totalValue)} icon={DollarSign} />
@@ -1126,7 +1117,7 @@ export default function OptionsTradeDashboard() {
             />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <StatCard
               title="Total Return"
               value={totalReturn !== null ? percent(totalReturn) : null}
@@ -1141,6 +1132,54 @@ export default function OptionsTradeDashboard() {
             />
             <StatCard title="Avg Loss" value={money(avgLoss)} icon={TrendingDown} />
           </div>
+
+          <Card className="rounded-xl border-amber-300 bg-amber-50 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold text-slate-700 underline decoration-2 underline-offset-2">
+                Links
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <a
+                  href="https://fta-trade-tracker.onrender.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
+                >
+                  FTA Dashboard
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+
+                <a
+                  href="https://fta-regime-dashboard.onrender.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
+                >
+                  FTA Market Intelligence
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+
+                {hasCloudWriteKey ? (
+                  <a
+                    href={MY_STOCK_PORTFOLIO_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
+                  >
+                    My Stock Portfolio
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                ) : (
+                  <div className="inline-flex items-center justify-between rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-sm font-medium text-slate-500 opacity-80">
+                    My Stock Portfolio
+                    <Lock className="h-4 w-4" />
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-300 bg-slate-100 p-4 text-slate-900 font-sans">
@@ -1150,10 +1189,6 @@ export default function OptionsTradeDashboard() {
 
           <Button variant="outline" onClick={handleExportTrades}>
             Export Trades
-          </Button>
-
-          <Button variant="outline" onClick={handleOpenStocksSheet} disabled={!hasCloudWriteKey}>
-            Open Stocks Sheet
           </Button>
 
           <Button variant="outline" onClick={handleForceCloudReload} disabled={syncingCloud}>
