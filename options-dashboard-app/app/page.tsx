@@ -408,7 +408,7 @@ type CloudSyncState = "checking" | "connected" | "readonly" | "offline" | "error
 type DashboardTab = "positions" | "closed" | "data";
 
 const CLOUD_WRITE_KEY_STORAGE_KEY = "options-dashboard-cloud-write-key";
-const STOCKS_SHEET_URL = "https://docs.google.com/spreadsheets/d/16tX-XFNUNGPL5sIv0fQVVMa-BtIEpuReSOgf3-ZJTKU/edit?usp=sharing";
+const STOCKS_SHEET_URL = "https://docs.google.com/spreadsheets/d/16tX-XFNUNGPL5sIv0fQVVMa-BtIEpuReSOgf3-ZJTKU/edit?gid=942797450#gid=942797450";
 
 async function fetchOptionSnapshot({
   trade,
