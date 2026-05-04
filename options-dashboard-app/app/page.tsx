@@ -1055,10 +1055,10 @@ export default function OptionsTradeDashboard() {
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm uppercase tracking-[0.2em] text-slate-500">
-              Options Tracker
+                Stock & Options Tracker
             </p>
             <h1 className="text-3xl font-semibold tracking-tight">
-              Real-Time Options Dashboard
+                Real Time Dashboard
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               This version is built around your current option positions and can
