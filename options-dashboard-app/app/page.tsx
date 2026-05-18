@@ -138,6 +138,7 @@ type Trade = {
   closedAt: string | null;
   notes: string;
   underlyingPrice?: number;
+  stopLoss?: number;
 };
 
 type NewTradeForm = {
@@ -152,6 +153,7 @@ type NewTradeForm = {
   notes: string;
   underlyingPrice: string;
   openedAt: string;
+  stopLoss: string;
 };
 
 type SellForm = {
@@ -266,6 +268,7 @@ function createEmptyNewTrade(): NewTradeForm {
     notes: "",
     underlyingPrice: "",
     openedAt: new Date().toISOString().slice(0, 10),
+    stopLoss: "",
   };
 }
 
@@ -364,6 +367,12 @@ function PositionRow({
         </div>
         {trade.notes ? (
           <div className="mt-1 text-sm font-semibold text-black italic">{trade.notes}</div>
+        ) : null}
+        {trade.stopLoss != null && trade.status === "OPEN" ? (
+          <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-2 py-0.5 text-sm font-semibold text-red-700">
+            <span>Stop Loss:</span>
+            <span>{money(trade.stopLoss * 100)}</span>
+          </div>
         ) : null}
       </div>
       <div className="flex items-center gap-4">
@@ -791,6 +800,8 @@ export default function OptionsTradeDashboard() {
     const currentPrice = Number(newTrade.currentPrice || newTrade.entryPrice || 0);
     const underlyingPrice =
       newTrade.underlyingPrice === "" ? undefined : Number(newTrade.underlyingPrice);
+    const stopLoss =
+      newTrade.stopLoss === "" ? undefined : Number(newTrade.stopLoss);
 
     if (!newTrade.symbol || !newTrade.expiration || !quantity || !strike || Number.isNaN(entryPrice)) {
       setError("Fill in symbol, expiration, strike, quantity, and entry price.");
@@ -817,6 +828,7 @@ export default function OptionsTradeDashboard() {
           quantity === 1 ? "buy" : "buys"
         }`,
       underlyingPrice,
+      stopLoss,
     };
 
     if (!syncJson([nextTrade, ...trades])) return;
@@ -1332,6 +1344,16 @@ export default function OptionsTradeDashboard() {
                     value={newTrade.underlyingPrice}
                     onChange={(e) => updateNewTrade("underlyingPrice", e.target.value)}
                     placeholder="49.70"
+                    type="number"
+                    step="0.01"
+                  />
+                </div>
+                <div>
+                  <Label className="mb-2 block">Stop Loss (option price)</Label>
+                  <Input
+                    value={newTrade.stopLoss}
+                    onChange={(e) => updateNewTrade("stopLoss", e.target.value)}
+                    placeholder="1.50"
                     type="number"
                     step="0.01"
                   />
