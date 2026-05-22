@@ -27,7 +27,6 @@ import {
   Upload,
   TrendingUp,
   TrendingDown,
-  DollarSign,
   Activity,
   Wifi,
   RefreshCw,
@@ -169,18 +168,6 @@ function positionCost(trade: Trade): number | null {
   const qty = Number(trade.quantity);
   if (!Number.isFinite(entry) || entry <= 0 || !Number.isFinite(qty) || qty <= 0) return null;
   return entry * 100 * qty;
-}
-
-function positionValue(trade: Trade): number | null {
-  const qty = Number(trade.quantity);
-  if (!Number.isFinite(qty) || qty <= 0) return null;
-  if (trade.status === "CLOSED") {
-    const ep = Number(trade.exitPrice);
-    if (!Number.isFinite(ep) || ep < 0) return null;
-    return ep * 100 * qty;
-  }
-  if (trade.currentPrice == null || !Number.isFinite(trade.currentPrice) || trade.currentPrice < 0) return null;
-  return trade.currentPrice * 100 * qty;
 }
 
 function contractPnl(trade: Trade): number | null {
@@ -606,33 +593,23 @@ export default function OptionsTradeDashboard() {
   }, [trades, search, statusFilter, range]);
 
   const openTrades = filtered.filter((t) => t.status === "OPEN");
+  const allOpenTrades = trades.filter((t) => t.status === "OPEN");
   const closedTrades = filtered.filter((t) => t.status === "CLOSED");
+
+  const allOpenPnls = allOpenTrades
+    .map((trade) => contractPnl(trade))
+    .filter((pnl): pnl is number => pnl !== null);
   const closedPnls = closedTrades
     .map((trade) => contractPnl(trade))
     .filter((pnl): pnl is number => pnl !== null);
   const wins = closedPnls.filter((pnl) => pnl > 0);
-  const losses = closedPnls.filter((pnl) => pnl < 0);
-  const totalPnl = filtered.reduce((sum, t) => { const p = contractPnl(t); return p !== null ? sum + p : sum; }, 0);
-  const totalCost = filtered.reduce((sum, t) => { const c = positionCost(t); return c !== null ? sum + c : sum; }, 0);
-  const totalValue = filtered.reduce((sum, t) => { const v = positionValue(t); return v !== null ? sum + v : sum; }, 0);
-  const winRate = closedPnls.length ? (wins.length / closedPnls.length) * 100 : 0;
+
+  const openPnl = allOpenPnls.reduce((sum, pnl) => sum + pnl, 0);
+  const totalPnl = closedPnls.reduce((sum, pnl) => sum + pnl, 0);
+  const winRate: number | null = closedPnls.length ? (wins.length / closedPnls.length) * 100 : null;
   const avgWin = wins.length
     ? wins.reduce((sum, pnl) => sum + pnl, 0) / wins.length
-    : 0;
-  const avgLoss = losses.length
-    ? losses.reduce((sum, pnl) => sum + pnl, 0) / losses.length
-    : 0;
-  const grossProfit = wins.reduce((sum, pnl) => sum + pnl, 0);
-  const grossLossAbs = Math.abs(losses.reduce((sum, pnl) => sum + pnl, 0));
-  const expectancy = closedPnls.length
-    ? ((wins.length / closedPnls.length) * avgWin) + ((losses.length / closedPnls.length) * avgLoss)
-    : 0;
-  const profitFactor: number | null = grossLossAbs > 0
-    ? grossProfit / grossLossAbs
-    : grossProfit > 0
-      ? Number.POSITIVE_INFINITY
-      : null;
-  const totalReturn: number | null = totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
+    : null;
 
   const saveTradesRemote = useCallback(async (nextTrades: Trade[], savedAt: string) => {
     try {
@@ -1150,61 +1127,42 @@ export default function OptionsTradeDashboard() {
         </div>
 
         <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <StatCard
-              title="Open Positions"
-              value={openTrades.length}
+              title="Open Trades"
+              value={allOpenTrades.length}
               icon={Activity}
-              description="Count of filtered trades with status OPEN."
+              description="Count of all open trades, regardless of selected date range."
             />
             <StatCard
-              title="Portfolio Cost"
-              value={money(totalCost)}
-              icon={DollarSign}
-              description="Sum of entry price x quantity x 100 across filtered trades."
-            />
-            <StatCard
-              title="Current Value"
-              value={money(totalValue)}
-              icon={DollarSign}
-              description="Open trades use current price; closed trades use exit price, each x quantity x 100."
-            />
-            <StatCard
-              title="Total P&L"
-              value={money(totalPnl)}
-              icon={totalPnl >= 0 ? TrendingUp : TrendingDown}
-              description="Sum of per-trade P&L across filtered trades."
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              title="Total Return"
-              value={totalReturn !== null ? percent(totalReturn) : null}
-              icon={totalReturn !== null && totalReturn >= 0 ? TrendingUp : TrendingDown}
-              hint="Model"
-              description="Total P&L divided by portfolio cost x 100."
+              title="Closed Trades"
+              value={closedTrades.length}
+              icon={Activity}
+              description="Count of closed trades filtered by selected date range."
             />
             <StatCard
               title="Win Rate"
-              value={percent(winRate)}
+              value={winRate !== null ? percent(winRate) : "--"}
               icon={TrendingUp}
-              hint="Closed trades with valid P&L"
-              description="Winning closed trades divided by closed trades with valid P&L x 100."
+              description="Winning filtered closed trades divided by filtered closed trades with valid P&L."
             />
             <StatCard
-              title="Expectancy"
-              value={money(expectancy)}
-              icon={expectancy >= 0 ? TrendingUp : TrendingDown}
-              hint="Per closed trade"
-              description="Win rate x average win + loss rate x average loss."
+              title="Open P&L"
+              value={allOpenPnls.length ? money(openPnl) : "--"}
+              icon={allOpenPnls.length ? (openPnl >= 0 ? TrendingUp : TrendingDown) : Activity}
+              description="Sum of P&L across all open trades."
             />
             <StatCard
-              title="Profit Factor"
-              value={profitFactor === Number.POSITIVE_INFINITY ? "Infinity" : profitFactor?.toFixed(2) ?? null}
-              icon={profitFactor !== null && profitFactor >= 1 ? TrendingUp : TrendingDown}
-              hint="Closed trades only"
-              description="Gross profit divided by the absolute value of gross loss."
+              title="Total P&L"
+              value={closedPnls.length ? money(totalPnl) : "--"}
+              icon={closedPnls.length ? (totalPnl >= 0 ? TrendingUp : TrendingDown) : Activity}
+              description="Sum of P&L across filtered closed trades."
+            />
+            <StatCard
+              title="Avg Win"
+              value={avgWin !== null ? money(avgWin) : "--"}
+              icon={TrendingUp}
+              description="Average positive P&L among filtered closed trades."
             />
           </div>
 
